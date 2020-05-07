@@ -1,0 +1,72 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+ extern crate tvm_runtime;
+ extern crate image;
+ extern crate ndarray;
+
+ use std::{
+     convert::TryFrom as _,
+     io::{Read as _, Write as _},
+ };
+ 
+ use image::{FilterType, GenericImageView};
+ use ndarray::{Array, ArrayD, Axis};
+
+ fn main() {
+     let syslib = tvm_runtime::SystemLibModule::default();
+ 
+     let graph_json = include_str!(concat!(env!("OUT_DIR"), "/graph.json"));
+     let params_bytes = include_bytes!(concat!(env!("OUT_DIR"), "/params.bin"));
+     let params = tvm_runtime::load_param_dict(params_bytes).unwrap();
+ 
+     let graph = tvm_runtime::Graph::try_from(graph_json).unwrap();
+     let mut exec = tvm_runtime::GraphExecutor::new(graph, &syslib).unwrap();
+     exec.load_params(params);
+     
+    let img = image::open(concat!(env!("CARGO_MANIFEST_DIR"), "/cat.jpg")).unwrap();
+    println!("original image dimensions: {:?}", img.dimensions());
+    // for bigger size images, one needs to first resize to 256x256
+    // with `img.resize_exact` method and then `image.crop` to 224x224
+    let img = img.resize(224, 224, FilterType::Nearest).to_rgb();
+    println!("resized image dimensions: {:?}", img.dimensions());
+    let mut pixels: Vec<f32> = vec![];
+    for pixel in img.pixels() {
+        let tmp = pixel.data;
+        // normalize the RGB channels using mean, std of imagenet1k
+        let tmp = [
+            (tmp[0] as f32 - 123.0) / 58.395, // R
+            (tmp[1] as f32 - 117.0) / 57.12,  // G
+            (tmp[2] as f32 - 104.0) / 57.375, // B
+        ];
+        for e in &tmp {
+            pixels.push(*e);
+        }
+    }
+
+    let x = Array::from_vec(pixels);
+    // let x = Array::one
+    exec.set_input("data", x.into());
+    exec.run();
+    let output = exec.get_output(0).unwrap();
+
+    println!("{:#?}", output.data().as_slice());
+
+ }
+ 
