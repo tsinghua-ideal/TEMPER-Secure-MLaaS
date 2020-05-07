@@ -53,6 +53,81 @@ class BinaryTree:
         return self.key
 
 
+def _torch2onnx(torch_model, input_tensor):
+    torch.onnx.export(torch_model, input_tensor, "temp.onnx", verbose=True, input_names=['input'],
+                      output_names=['output'])
+
+
+def _onnx2tvm(input_tensor, onnx_model='temp.onnx', build_dir='./'):
+    """
+    compile and optimize the onnx model into TVM model.
+    :param input_tensor:
+    :param onnx_model:
+    :param build_dir:
+    """
+    onnx_model = onnx.load(onnx_model)
+    target = 'llvm --system-lib'
+
+    input_name = 'input'
+    shape_dict = {input_name: input_tensor.shape}
+    mod, params = relay.frontend.from_onnx(onnx_model, shape_dict)
+    with relay.build_config(opt_level=4):
+        graph, lib, params = relay.build_module.build(
+            mod, target=target, params=params)
+
+    if not osp.isdir(build_dir):
+        os.makedirs(build_dir, exist_ok=True)
+
+    lib.save(osp.join(build_dir, 'model.o'))
+    with open(osp.join(build_dir, 'graph.json'), 'w') as f_graph_json:
+        f_graph_json.write(graph)
+    with open(osp.join(build_dir, 'params.bin'), 'wb') as f_params:
+        f_params.write(relay.save_param_dict(params))
+
+
+def _torch2tvm(torch_model, input_tensor):
+    """
+    Transform a torch model into a TVM one. This function is preferred.
+    :param torch_model:
+    :param input_tensor:
+    :return:
+    """
+
+
+def _calculate_latency():
+    """
+    Get the output of RUST application by Process Module. A external bash can be applied:
+    #!/bin/bash
+    cargo build
+    path=(the path to executable file
+    for i in 0..50;
+    do
+        ftxsgx-runner ${path}
+    done;
+    :return: the latency
+    """
+    # note that dynamic path is preferred. Revise sgx-infer.sh to do this.
+    ret = subprocess.run('source /home/lifabing/Documents/sgx-infer.sh', shell=True, stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, encoding="utf-8", executable="/bin/bash", timeout=1000)
+    arr = ret.stdout.split('\n')[0:-1]
+    arr = np.array(arr, dtype='int')
+    return arr.mean() / 1000
+
+
+def calculate_latency(torch_model, input_tensor, onnx_model='temp.onnx', build_dir='./'):
+    """
+    calculate the latency of given model.
+    :param torch_model:
+    :param input_tensor:
+    :param onnx_model:
+    :param build_dir:
+    :return:
+    """
+    _torch2onnx(torch_model, input_tensor)
+    _onnx2tvm(input_tensor, onnx_model=onnx_model, build_dir=build_dir)
+    return _calculate_latency()
+
+
 class ModelSet:
     def __init__(self, model=None, input_size=None, unit=None, blocks_params=None):
         """
@@ -102,63 +177,6 @@ class ModelSet:
                     input_tensor = layer(input_tensor)
                 # print(layer)
 
-    def _torch2onnx(self, torch_model, input_tensor):
-        torch.onnx.export(torch_model, input_tensor, "temp.onnx", verbose=True, input_names=['input'],
-                          output_names=['output'])
-
-    def _onnx2tvm(self, input_tensor, onnx_model='temp.onnx', build_dir='./'):
-        """
-        compile and optimize the onnx model into TVM model.
-        :param input_tensor:
-        :param onnx_model:
-        :param build_dir:
-        """
-        onnx_model = onnx.load(onnx_model)
-        target = 'llvm --system-lib'
-
-        input_name = 'input'
-        shape_dict = {input_name: input_tensor.shape}
-        mod, params = relay.frontend.from_onnx(onnx_model, shape_dict)
-        with relay.build_config(opt_level=4):
-            graph, lib, params = relay.build_module.build(
-                mod, target=target, params=params)
-
-        if not osp.isdir(build_dir):
-            os.makedirs(build_dir, exist_ok=True)
-
-        lib.save(osp.join(build_dir, 'model.o'))
-        with open(osp.join(build_dir, 'graph.json'), 'w') as f_graph_json:
-            f_graph_json.write(graph)
-        with open(osp.join(build_dir, 'params.bin'), 'wb') as f_params:
-            f_params.write(relay.save_param_dict(params))
-
-    def _torch2tvm(self, torch_model, input_tensor):
-        """
-        Transform a torch model into a TVM one. This function is preferred.
-        :param torch_model:
-        :param input_tensor:
-        :return:
-        """
-
-    def _calculate_latency(self):
-        """
-        Get the output of RUST application by Process Module. A external bash can be applied:
-        #!/bin/bash
-        cargo build
-        path=(the path to executable file
-        for i in 0..50;
-        do
-            ftxsgx-runner ${path}
-        done;
-        :return: the latency
-        """
-        # note that dynamic path is preferred. Revise sgx-infer.sh to do this.
-        ret = subprocess.run('source /home/lifabing/Documents/sgx-infer.sh', shell=True, stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE, encoding="utf-8", executable="/bin/bash", timeout=1000)
-        arr = ret.stdout.split('\n')[0:-1]
-        arr = np.array(arr, dtype='int')
-        return arr.mean() / 1000
-
     def _get_block_latency(self):
         """
         calculate the latency of each block
@@ -166,9 +184,11 @@ class ModelSet:
         """
         for i in range(len(self.blocks_params)):
             layer, shape, _ = self.blocks_params[i]
-            self._torch2tvm(layer, torch.randn(shape))
+            # _torch2tvm(layer, torch.randn(shape))
+            _torch2onnx(model, torch.randn(shape))
+            _onnx2tvm(torch.randn(shape))
 
-            blocks_latency = (self._calculate_latency(),)
+            blocks_latency = (_calculate_latency(),)
             self.blocks_params[i] = self.blocks_params[i] + blocks_latency
 
     def get_block_params(self):
@@ -201,6 +221,7 @@ class Partition:
         self.get_block_params = block_params
         self.upper_params_size = upper_params_size
         self.strategy = []
+        self.search_tree = BinaryTree
 
     def lookup(self, key):
         """
@@ -210,6 +231,29 @@ class Partition:
         for parted in self.strategy:
             if key in parted:
                 return parted[key]
+
+    def travel_for_block(self, index):
+        """
+        travel the tree for a block to fuse
+        :param index:
+        :return: A fused model
+        """
+        # To be filled
+        input_shape = self.get_block_params[1]
+        model = nn.Sequential()
+        return input_shape, model
+
+    def partition_rule(self, index):
+        if len(self.get_block_params) > index:
+            return False
+        input_shape, model_n = self.travel_for_block(index)
+        input_shape, model_n_plus_one = self.travel_for_block(index + 1)
+        latency_n = calculate_latency(model_n, torch.randn(input_shape))
+        latency_n_plus_one = calculate_latency(model_n_plus_one, torch.randn(input_shape))
+        if latency_n + self.get_block_params[index][-1] > latency_n_plus_one
+            return True
+        else:
+            return False
 
     def binary_partition(self):
         """
@@ -223,8 +267,12 @@ class Partition:
             3. else stop partition
         :return:
         """
+        self.search_tree.setRootVal(Node(0, self.get_block_params[0][-1]))
         for i in range(len(self.get_block_params)):
-            self.binary_partition()
+            if self.partition_rule(i):
+                self.search_tree.insertLeft(Node(i, self.get_block_params[i][-1]))
+            else:
+                self.search_tree.insertRight(Node(i, self.get_block_params[i][-1]))
 
 
 if __name__ == '__main__':
