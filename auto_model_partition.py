@@ -4,6 +4,7 @@ import torch.onnx
 import tvm.relay as relay
 from thop import profile
 
+import math
 import numpy as np
 from self_defined_nn import *
 
@@ -51,6 +52,26 @@ class BinaryTree:
 
     def getRootVal(self):
         return self.key
+
+
+def isRightChild(index):
+    if (index - 1) % 2 == 1:
+        return True
+    else:
+        return False
+
+
+def getNearPartition(index):
+    """
+
+    :param index:
+    :return: the layer number of the node.
+    """
+    partition = [int(math.log2(index + 1))]
+    index = (index-1)/2
+    while not isRightChild(index):
+        partition.append(int(math.log2(index + 1)))
+    return partition
 
 
 def _torch2onnx(torch_model, input_tensor):
@@ -134,7 +155,7 @@ class ModelSet:
         :param model: The model (An instance of torch.nn.Module)
         :param input_size: The input size of model input
         :param unit: The grain of partition. Default: conv_block, separable_conv_block, BasicBlock
-        :param blocks_params: A list of set of (model, parameter size). Default: null
+        :param blocks_params: A list of set of (model, input shape, parameter size, latency). Default: null
         """
         if unit is None:
             unit = [conv_block, separable_conv_block, BasicBlock]
@@ -151,7 +172,7 @@ class ModelSet:
         :param model: The model (An instance of torch.nn.Module)
         :param input_size: The input size of model input
         :param unit: The grain of partition. Default: conv_block, separable_conv_block, BasicBlock
-        :param blocks_params: A list of set of (model, parameter size). Default: null
+        :param blocks_params: A list of set of (model, input shape, parameter size, latency). Default: null
         :return: True if no exception
         """
         self.model = model
@@ -169,13 +190,15 @@ class ModelSet:
         The first step of calculation, calculate the parameter size of the given model
         """
         input_tensor = torch.rand(self.input_size)
+        bp = []
         for layer in self.model.modules():
             for block in self.unit:
                 if isinstance(layer, block):
                     _, total_params = profile(layer, (input_tensor,), verbose=False)
-                    self.blocks_params.append((layer, input_tensor.shape, float(total_params * 4. / (1024 ** 2.))))
+                    bp.append((layer, input_tensor.shape, float(total_params * 4. / (1024 ** 2.))))
                     input_tensor = layer(input_tensor)
                 # print(layer)
+        self.blocks_params = bp
 
     def _get_block_latency(self):
         """
@@ -207,7 +230,6 @@ class ModelSet:
         if not self.blocks_params:
             self._stat_layer_params()
             self._get_block_latency()
-        possible_partions = []
 
 
 class Partition:
@@ -218,19 +240,25 @@ class Partition:
     """
 
     def __init__(self, block_params=None, upper_params_size=None):
-        self.get_block_params = block_params
+        """
+
+        :param block_params: A list of set of (model, input shape, parameter size, latency). Default: null
+        :param upper_params_size:
+        """
+        self.block_params = block_params
         self.upper_params_size = upper_params_size
-        self.strategy = []
-        self.search_tree = BinaryTree
+        self.look_up_table = []
+        self.search_tree = []
 
     def lookup(self, key):
         """
         look up the searched path.
         :return:
         """
-        for parted in self.strategy:
+        for parted in self.look_up_table:
             if key in parted:
                 return parted[key]
+        return None
 
     def travel_for_block(self, index):
         """
@@ -239,25 +267,36 @@ class Partition:
         :return: A fused model
         """
         # To be filled
-        input_shape = self.get_block_params[1]
-        model = nn.Sequential()
-        return input_shape, model
+        nearestPartition = getNearPartition(index)
+        input_shape = self.block_params[nearestPartition[-1]][1]
+        fused_model = self.block_params[nearestPartition[-1]][0]
+        for i in range(len(nearestPartition)-1):
+            fused_model = nn.Sequential(fused_model, self.block_params[nearestPartition[-i]][0])
+        return input_shape, fused_model, nearestPartition.reverse()
 
     def partition_rule(self, index):
-        if len(self.get_block_params) > index:
+        n_plus_one = math.log2(index+1) + 1
+        if len(self.block_params) > n_plus_one:
             return False
-        input_shape, model_n = self.travel_for_block(index)
-        input_shape, model_n_plus_one = self.travel_for_block(index + 1)
-        latency_n = calculate_latency(model_n, torch.randn(input_shape))
-        latency_n_plus_one = calculate_latency(model_n_plus_one, torch.randn(input_shape))
-        if latency_n + self.get_block_params[index][-1] > latency_n_plus_one
+        input_shape, model_n, partition = self.travel_for_block(index)
+        model_n_plus_one = nn.Sequential(model_n, self.block_params[n_plus_one][0])
+
+        latency_n = self.lookup(partition)
+        latency_n_plus_one = self.lookup(partition.append(n_plus_one))
+        if not latency_n:
+            latency_n = calculate_latency(model_n, torch.randn(input_shape))
+            self.look_up_table.append({partition: latency_n})
+        if not latency_n_plus_one:
+            latency_n_plus_one = calculate_latency(model_n_plus_one, torch.randn(input_shape))
+            self.look_up_table.append({partition.append(n_plus_one): latency_n_plus_one})
+        if latency_n + self.block_params[index][-1] > latency_n_plus_one:
             return True
         else:
             return False
 
     def binary_partition(self):
         """
-        Maybe recursive function is helpful for coding. So, how to record the search path?
+        Maybe recursive function is helpful for coding. However, how to record the search path?
         Partition rule: if Latency_(1..n)≤Latency_(1..n-1)+ Latency_(n), do partition.
         1) Partition on B1 and B2, then for B1 ,look up the Latency Table and applied the partition rule.
         if there is only one block, calculate it;
@@ -267,12 +306,22 @@ class Partition:
             3. else stop partition
         :return:
         """
-        self.search_tree.setRootVal(Node(0, self.get_block_params[0][-1]))
-        for i in range(len(self.get_block_params)):
-            if self.partition_rule(i):
-                self.search_tree.insertLeft(Node(i, self.get_block_params[i][-1]))
-            else:
-                self.search_tree.insertRight(Node(i, self.get_block_params[i][-1]))
+        tree = np.zeros(2 ** (len(self.block_params) + 1))
+        tree[0] = 1
+        for i in range(2 ** len(self.block_params)):
+            if tree[i] == 0:
+                continue
+            if not self.partition_rule(i):
+                # add left child
+                tree[2 * i + 1] = 1
+            # add right child
+            tree[2 * i + 2] = 1
+        self.search_tree = tree
+
+    def get_strategy(self):
+        print(self.look_up_table)
+        # for i in range(len(self.search_tree)):
+        #     f
 
 
 if __name__ == '__main__':
@@ -286,5 +335,9 @@ if __name__ == '__main__':
     import torchvision.models as models
 
     model = models.mobilenet_v2()
-    ModelSet._torch2onnx(ModelSet(), model, torch.randn(1, 3, 150, 150))
-    ModelSet._onnx2tvm(ModelSet(), torch.randn(1, 3, 150, 150))
+    ms = ModelSet(model, (1, 3, 150, 150))
+    ms.run()
+    pt = Partition(ms.blocks_params)
+    pt.binary_partition()
+    pt.get_strategy()
+
