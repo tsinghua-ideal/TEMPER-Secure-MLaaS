@@ -210,6 +210,48 @@ class mobilenet4(nn.Module):
         # out = self.conv6(out)
         # out = self.conv7(out)
         return out
+
+
+class mobilenet(nn.Module):
+    def __init__(self, num_classes=10):
+        super(mobilenet, self).__init__()
+        self.conv1 = conv_block(3, 32, stride=(2, 2))
+        self.s1 = separable_conv_block(32, 64)
+        self.s2 = separable_conv_block(64, 128, downsample=True)
+        self.s3 = separable_conv_block(128, 128)
+        self.s4 = separable_conv_block(128, 256, downsample=True)
+        self.s5 = separable_conv_block(256, 256)
+        self.s6 = separable_conv_block(256, 512, downsample=True)
+        features = []
+        for i in range(7, 12):
+            features.append(separable_conv_block(512, 512))
+        self.features = nn.Sequential(*features)
+        self.s12 = separable_conv_block(512, 1024, downsample=True)
+        self.s13 = separable_conv_block(1024, 1024)
+        # self.pool = nn.AvgPool2d(7)
+        # building classifier
+        # self.classifier = nn.Sequential(
+        #     nn.Dropout(0.2),
+        #     nn.Linear(1024, num_classes),
+        # )
+
+    # 模型计算时的前向过程，也就是按照这个过程进行计算
+    def forward(self, x):
+        out = self.conv1(x)
+        out = self.s1(out)
+        out = self.s2(out)
+        out = self.s3(out)
+        out = self.s4(out)
+        out = self.s5(out)
+        out = self.s6(out)
+        out = self.features(out)
+        out = self.s12(out)
+        out = self.s13(out)
+        # out = out.mean([2, 3])
+        # out = self.pool(out)
+        out = out.view(-1, 1024)
+        # out = self.classifier(out)
+        return out
     # def separable_conv_block(self, depthwise_channels, pointwise_channels,
     #                          kernel_size=(3, 3), downsample=False, padding=(1, 1)):
     #     """Helper function to get a separable conv block"""

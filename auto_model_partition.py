@@ -71,9 +71,10 @@ def getNearPartition(index):
     if index == 0:
         return partition
     else:
-        index = (index-1)/2
+        index = int((index-1)/2)
         while not isRightChild(index):
             partition.append(int(math.log2(index + 1)))
+            index = int((index - 1) / 2)
         return partition
 
 
@@ -147,6 +148,9 @@ def calculate_latency(torch_model, input_tensor, onnx_model='temp.onnx', build_d
     :param build_dir:
     :return:
     """
+    # import pickle
+    # with open('cp.pkl', 'wb') as f:
+    #     pickle.dump((torch_model, input_tensor), f)
     _torch2onnx(torch_model, input_tensor)
     _onnx2tvm(input_tensor, onnx_model=onnx_model, build_dir=build_dir)
     return _calculate_latency()
@@ -253,7 +257,7 @@ class Partition:
         self.look_up_table = []
         self.search_tree = []
         for i in range(len(block_params)):
-            self.look_up_table.append({(i): block_params[i][3]})
+            self.look_up_table.append({(i,): block_params[i][3]})
 
     def lookup(self, key):
         """
@@ -273,11 +277,11 @@ class Partition:
         """
         # To be filled
         nearestPartition = getNearPartition(index)
-        input_shape = self.block_params[nearestPartition[-1]][1]
-        fused_model = self.block_params[nearestPartition[-1]][0]
-        for i in range(len(nearestPartition)-1):
-            fused_model = nn.Sequential(fused_model, self.block_params[nearestPartition[-i]][0])
         nearestPartition.reverse()
+        input_shape = self.block_params[nearestPartition[0]][1]
+        fused_model = self.block_params[nearestPartition[0]][0]
+        for i in range(1, len(nearestPartition)):
+            fused_model = nn.Sequential(fused_model, self.block_params[nearestPartition[i]][0])
         return input_shape, fused_model, nearestPartition
 
     def partition_rule(self, index):
@@ -288,7 +292,8 @@ class Partition:
         model_n_plus_one = nn.Sequential(model_n, self.block_params[n_plus_one][0])
 
         latency_n = self.lookup(tuple(partition))
-        partition_n_plus_one = partition
+        import copy
+        partition_n_plus_one = copy.copy(partition)
         partition_n_plus_one.append(n_plus_one)
         latency_n_plus_one = self.lookup(tuple(partition_n_plus_one))
         if not latency_n:
@@ -297,7 +302,7 @@ class Partition:
         if not latency_n_plus_one:
             latency_n_plus_one = calculate_latency(model_n_plus_one, torch.randn(input_shape))
             self.look_up_table.append({tuple(partition_n_plus_one): latency_n_plus_one})
-        if latency_n + self.block_params[index][-1] > latency_n_plus_one:
+        if latency_n + self.block_params[n_plus_one][-1] > latency_n_plus_one:
             return True
         else:
             return False
@@ -314,17 +319,16 @@ class Partition:
             3. else stop partition
         :return:
         """
-        tree = np.zeros(2 ** len(self.block_params) - 1)
-        tree[0] = 1
+        self.search_tree = np.zeros(2 ** len(self.block_params) - 1)
+        self.search_tree[0] = 1
         for i in range(2 ** (len(self.block_params)-1) - 1):
-            if tree[i] == 0:
+            if self.search_tree[i] == 0:
                 continue
-            if not self.partition_rule(i):
+            if self.partition_rule(i):
                 # add left child
-                tree[2 * i + 1] = 1
+                self.search_tree[2 * i + 1] = 1
             # add right child
-            tree[2 * i + 2] = 1
-        self.search_tree = tree
+            self.search_tree[2 * i + 2] = 1
 
     def get_strategy(self):
         print(self.look_up_table)
@@ -342,17 +346,20 @@ if __name__ == '__main__':
     #     print(layers_params)
     # import torchvision.models as models
 
-    # model = mobilenet1()
-    # model = ResNet1(BasicBlock, 10)
-    model = nn.Sequential(mobilenet1(), mobilenet2(), mobilenet3())
-    ms = ModelSet(model, (1, 3, 224, 224))
-    ms.run(70)
+    # model = mobilenet(1000)
+    # # model = ResNet1(BasicBlock, 10)
+    # # model = nn.Sequential(mobilenet1(), mobilenet2(), mobilenet3())
+    # ms = ModelSet(model, (1, 3, 224, 224))
+    # ms.run(70)
     import pickle
-    with open('modelset.o', 'wb') as f:
-        pickle.dump(ms, f)
+    # with open('modelset.o', 'wb') as f:
+    #     pickle.dump(ms, f)
+    with open('modelset.o', 'rb') as f:
+        ms = pickle.load(f)
     pt = Partition(ms.blocks_params)
+    del ms
     pt.binary_partition()
     pt.get_strategy()
     with open('partition.o', 'wb') as f:
-        pickle.dump(ms, f)
+        pickle.dump(pt, f)
 
