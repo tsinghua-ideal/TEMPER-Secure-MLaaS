@@ -68,10 +68,13 @@ def getNearPartition(index):
     :return: the layer number of the node.
     """
     partition = [int(math.log2(index + 1))]
-    index = (index-1)/2
-    while not isRightChild(index):
-        partition.append(int(math.log2(index + 1)))
-    return partition
+    if index == 0:
+        return partition
+    else:
+        index = (index-1)/2
+        while not isRightChild(index):
+            partition.append(int(math.log2(index + 1)))
+        return partition
 
 
 def _torch2onnx(torch_model, input_tensor):
@@ -158,7 +161,7 @@ class ModelSet:
         :param blocks_params: A list of set of (model, input shape, parameter size, latency). Default: null
         """
         if unit is None:
-            unit = [conv_block, separable_conv_block, BasicBlock]
+            unit = [conv_block, separable_conv_block, BasicBlock, nn.Dropout, nn.Linear]
         if blocks_params is None:
             blocks_params = []
         self.unit = unit
@@ -208,7 +211,7 @@ class ModelSet:
         for i in range(len(self.blocks_params)):
             layer, shape, _ = self.blocks_params[i]
             # _torch2tvm(layer, torch.randn(shape))
-            _torch2onnx(model, torch.randn(shape))
+            _torch2onnx(layer, torch.randn(shape))
             _onnx2tvm(torch.randn(shape))
 
             blocks_latency = (_calculate_latency(),)
@@ -249,6 +252,8 @@ class Partition:
         self.upper_params_size = upper_params_size
         self.look_up_table = []
         self.search_tree = []
+        for i in range(len(block_params)):
+            self.look_up_table.append({(i): block_params[i][3]})
 
     def lookup(self, key):
         """
@@ -272,23 +277,26 @@ class Partition:
         fused_model = self.block_params[nearestPartition[-1]][0]
         for i in range(len(nearestPartition)-1):
             fused_model = nn.Sequential(fused_model, self.block_params[nearestPartition[-i]][0])
-        return input_shape, fused_model, nearestPartition.reverse()
+        nearestPartition.reverse()
+        return input_shape, fused_model, nearestPartition
 
     def partition_rule(self, index):
-        n_plus_one = math.log2(index+1) + 1
-        if len(self.block_params) > n_plus_one:
+        n_plus_one = int(math.log2(index+1) + 1)
+        if len(self.block_params) < n_plus_one:
             return False
         input_shape, model_n, partition = self.travel_for_block(index)
         model_n_plus_one = nn.Sequential(model_n, self.block_params[n_plus_one][0])
 
-        latency_n = self.lookup(partition)
-        latency_n_plus_one = self.lookup(partition.append(n_plus_one))
+        latency_n = self.lookup(tuple(partition))
+        partition_n_plus_one = partition
+        partition_n_plus_one.append(n_plus_one)
+        latency_n_plus_one = self.lookup(tuple(partition_n_plus_one))
         if not latency_n:
             latency_n = calculate_latency(model_n, torch.randn(input_shape))
-            self.look_up_table.append({partition: latency_n})
+            self.look_up_table.append({tuple(partition): latency_n})
         if not latency_n_plus_one:
             latency_n_plus_one = calculate_latency(model_n_plus_one, torch.randn(input_shape))
-            self.look_up_table.append({partition.append(n_plus_one): latency_n_plus_one})
+            self.look_up_table.append({tuple(partition_n_plus_one): latency_n_plus_one})
         if latency_n + self.block_params[index][-1] > latency_n_plus_one:
             return True
         else:
@@ -306,9 +314,9 @@ class Partition:
             3. else stop partition
         :return:
         """
-        tree = np.zeros(2 ** (len(self.block_params) + 1))
+        tree = np.zeros(2 ** len(self.block_params) - 1)
         tree[0] = 1
-        for i in range(2 ** len(self.block_params)):
+        for i in range(2 ** (len(self.block_params)-1) - 1):
             if tree[i] == 0:
                 continue
             if not self.partition_rule(i):
@@ -332,12 +340,19 @@ if __name__ == '__main__':
     #     # for x in layers_params:
     #     #     layer, params = x
     #     print(layers_params)
-    import torchvision.models as models
+    # import torchvision.models as models
 
-    model = models.mobilenet_v2()
-    ms = ModelSet(model, (1, 3, 150, 150))
-    ms.run()
+    # model = mobilenet1()
+    # model = ResNet1(BasicBlock, 10)
+    model = nn.Sequential(mobilenet1(), mobilenet2(), mobilenet3())
+    ms = ModelSet(model, (1, 3, 224, 224))
+    ms.run(70)
+    import pickle
+    with open('modelset.o', 'wb') as f:
+        pickle.dump(ms, f)
     pt = Partition(ms.blocks_params)
     pt.binary_partition()
     pt.get_strategy()
+    with open('partition.o', 'wb') as f:
+        pickle.dump(ms, f)
 
