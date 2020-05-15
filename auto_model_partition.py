@@ -119,7 +119,7 @@ def _torch2tvm(torch_model, input_tensor):
     """
 
 
-def _calculate_latency():
+def _calculate_latency(input_size):
     """
     Get the output of RUST application by Process Module. A external bash can be applied:
     #!/bin/bash
@@ -132,7 +132,7 @@ def _calculate_latency():
     :return: the latency
     """
     # note that dynamic path is preferred. Revise sgx-infer.sh to do this.
-    ret = subprocess.run('source /home/lifabing/Documents/sgx-infer.sh', shell=True, stdout=subprocess.PIPE,
+    ret = subprocess.run('source /home/lifabing/sgx/best-partion/inference/src/sgx-infer.sh ' + input_size, shell=True, stdout=subprocess.PIPE,
                          stderr=subprocess.PIPE, encoding="utf-8", executable="/bin/bash", timeout=1000)
     arr = ret.stdout.split('\n')[0:-1]
     arr = np.array(arr, dtype='int')
@@ -153,7 +153,9 @@ def calculate_latency(torch_model, input_tensor, onnx_model='temp.onnx', build_d
     #     pickle.dump((torch_model, input_tensor), f)
     _torch2onnx(torch_model, input_tensor)
     _onnx2tvm(input_tensor, onnx_model=onnx_model, build_dir=build_dir)
-    return _calculate_latency()
+    shape = input_tensor.shape
+    shape = str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/'+str(shape[3])
+    return _calculate_latency(input_size=shape)
 
 
 class ModelSet:
@@ -218,7 +220,7 @@ class ModelSet:
             _torch2onnx(layer, torch.randn(shape))
             _onnx2tvm(torch.randn(shape))
 
-            blocks_latency = (_calculate_latency(),)
+            blocks_latency = (_calculate_latency(str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/'+str(shape[3])),)
             self.blocks_params[i] = self.blocks_params[i] + blocks_latency
 
     def get_block_params(self):
@@ -346,16 +348,16 @@ if __name__ == '__main__':
     #     print(layers_params)
     # import torchvision.models as models
 
-    # model = mobilenet(1000)
+    model = mobilenet(1000)
     # # model = ResNet1(BasicBlock, 10)
     # # model = nn.Sequential(mobilenet1(), mobilenet2(), mobilenet3())
-    # ms = ModelSet(model, (1, 3, 224, 224))
-    # ms.run(70)
+    ms = ModelSet(model, (1, 3, 224, 224))
+    ms.run(70)
     import pickle
-    # with open('modelset.o', 'wb') as f:
-    #     pickle.dump(ms, f)
-    with open('modelset.o', 'rb') as f:
-        ms = pickle.load(f)
+    with open('modelset.o', 'wb') as f:
+        pickle.dump(ms, f)
+    # with open('modelset.o', 'rb') as f:
+    #     ms = pickle.load(f)
     pt = Partition(ms.blocks_params)
     del ms
     pt.binary_partition()

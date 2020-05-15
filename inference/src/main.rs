@@ -40,7 +40,11 @@
     ms
 }
  fn main() {
-    let shape = [(1, 3, 150, 150), (1, 64, 38, 38), (1, 128, 19, 19), (1, 256, 10, 10), (1, 512, 10, 10)];
+    let path = env!("PATH").split(":");
+    let vec: Vec<&str> = path.collect();
+    let a = vec[2].split("/");
+    let vec: Vec<&str> = a.collect();
+    let shape = (vec[0].to_string().parse::<usize>().unwrap(), vec[1].to_string().parse::<usize>().unwrap(), vec[2].to_string().parse::<usize>().unwrap(), vec[3].to_string().parse::<usize>().unwrap());
 
     let syslib = tvm_runtime::SystemLibModule::default();
     let graph_json = include_str!(concat!(env!("OUT_DIR"), "/graph.json"));
@@ -53,10 +57,10 @@
 
     let mut rng =rand::thread_rng();
     let mut ran = vec![];
-    for _i in 0..shape[0].0*shape[0].1*shape[0].2*shape[0].3{
+    for _i in 0..shape.0*shape.1*shape.2*shape.3{
         ran.push(rng.gen::<f32>()*256.);
     }
-    let x = Array::from_shape_vec(shape[0], ran).unwrap();
+    let x = Array::from_shape_vec(shape, ran).unwrap();
     // println!("{:#?}", &x);
     
     let sy_time = SystemTime::now();
