@@ -333,9 +333,50 @@ class Partition:
             self.search_tree[2 * i + 2] = 1
 
     def get_strategy(self):
-        print(self.look_up_table)
-        # for i in range(len(self.search_tree)):
-        #     f
+        """
+        seems to have some problems on look up the key, so i set the unknown result to 10000
+        :return:
+        """
+        # print(self.look_up_table)
+        latency = []
+        for i in range(2 ** (len(self.block_params)-1) - 1, 2 ** len(self.block_params) - 1):
+            if self.search_tree[i] == 0:
+                continue
+            else:
+                strategy = []
+                part = ()
+                index = i
+                while index is not 0:
+                    layer_n = int(math.log2(index + 1))
+                    part = part + (layer_n,)
+                    if isRightChild(index):
+                        strategy.append(part)
+                        part = ()
+                    if index is 1:
+                        strategy[-1] = strategy[-1] + (0,)
+                    if index is 2:
+                        strategy.append((0,))
+                    index = int((index - 1) / 2)
+                latency.append(strategy)
+        print(latency)
+        total_latency = []
+        for lt in latency:
+            total = 0
+            for key in lt:
+                key = tuple(reversed(key))
+                la = self.lookup(key)
+                if la:
+                    total += la
+                else:
+                    total_latency.append(10000)
+                    continue
+            total_latency.append(total)
+        total_latency = np.array(total_latency, dtype='float64')
+        result = latency[np.argmin(total_latency)]
+        print(result)
+        for slice in result:
+            slice = tuple(reversed(slice))
+
 
 
 if __name__ == '__main__':
