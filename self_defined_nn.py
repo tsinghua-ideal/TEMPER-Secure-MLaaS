@@ -3,13 +3,16 @@ import torch.nn as nn
 
 
 class conv_block(nn.Module):
-    def __init__(self, input_channels, out_channels, kernel_size = (3, 3), stride = (1, 1), padding = (1, 1)):
+    def __init__(self, input_channels, out_channels, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), pool=None):
         super(conv_block, self).__init__()
         conv = nn.Conv2d(input_channels, out_channels, kernel_size=kernel_size, padding=padding, stride=stride,
                          groups=1, bias=False)
         bn = nn.BatchNorm2d(out_channels)
         relu = nn.ReLU6(inplace=True)
-        self.features = nn.Sequential(conv, bn, relu)
+        if pool is None:
+            self.features = nn.Sequential(conv, bn, relu)
+        else:
+            self.features = nn.Sequential(conv, bn, relu, pool)
 
     def forward(self, x):
         return self.features(x)
@@ -46,6 +49,19 @@ class separable_conv_block(nn.Module):
 
     def forward(self, x):
         return self.features(x)
+
+
+class Classifier(nn.Module):
+    def __init__(self, input_planes, num_classes, pool_stride=(1, 1)):
+        super(Classifier, self).__init__()
+        self.avgpool = nn.AdaptiveAvgPool2d(pool_stride)
+        self.fc = nn.Linear(input_planes, num_classes)
+
+    def forward(self, x):
+        x = self.avgpool(x)
+        x = torch.flatten(x, 1)
+        x = self.fc(x)
+        return x
 
 
 def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
@@ -300,11 +316,13 @@ class ResNet1(nn.Module):
                              "or a 3-element tuple, got {}".format(replace_stride_with_dilation))
         self.groups = groups
         self.base_width = width_per_group
-        self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3,
-                               bias=False)
-        self.bn1 = norm_layer(self.inplanes)
-        self.relu = nn.ReLU(inplace=True)
-        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        # self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3,
+        #                        bias=False)
+        # self.bn1 = norm_layer(self.inplanes)
+        # self.relu = nn.ReLU(inplace=True)
+        self.conv1 = conv_block(3, self.inplanes, kernel_size=7, stride=2, padding=3,
+                                pool=nn.MaxPool2d(kernel_size=3, stride=2, padding=1))
+        # self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         self.layer1 = self._make_layer(block, 64, 2)
 
     def _make_layer(self, block, planes, blocks, stride=1, dilate=False):
@@ -334,9 +352,9 @@ class ResNet1(nn.Module):
     def _forward_impl(self, x):
         # See note [TorchScript super()]
         x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu(x)
-        x = self.maxpool(x)
+        # x = self.bn1(x)
+        # x = self.relu(x)
+        # x = self.maxpool(x)
 
         x = self.layer1(x)
 
@@ -488,8 +506,9 @@ class ResNet4(nn.Module):
 
         self.layer4 = self._make_layer(block, 512, 2, stride=2,
                                        dilate=replace_stride_with_dilation[2])
-        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(512 * block.expansion, num_classes)
+        # self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        # self.fc = nn.Linear(512 * block.expansion, num_classes)
+        self.classifier = Classifier(512 * block.expansion, num_classes, (1, 1))
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -526,9 +545,10 @@ class ResNet4(nn.Module):
         # See note [TorchScript super()]
         x = self.layer4(x)
 
-        x = self.avgpool(x)
-        x = torch.flatten(x, 1)
-        x = self.fc(x)
+        # x = self.avgpool(x)
+        # x = torch.flatten(x, 1)
+        # x = self.fc(x)
+        x = self.classifier(x)
 
         return x
 
@@ -536,91 +556,108 @@ class ResNet4(nn.Module):
         return self._forward_impl(x)
 
 
-class ResNet5(nn.Module):
-
-    def __init__(self, block, num_classes=1000, zero_init_residual=False,
-                 groups=1, width_per_group=64, replace_stride_with_dilation=None,
-                 norm_layer=None):
-        super(ResNet5, self).__init__()
-        if norm_layer is None:
-            norm_layer = nn.BatchNorm2d
-        self._norm_layer = norm_layer
-
-        self.inplanes = 64
-        self.dilation = 1
-        if replace_stride_with_dilation is None:
-            # each element in the tuple indicates if we should replace
-            # the 2x2 stride with a dilated convolution instead
-            replace_stride_with_dilation = [False, False, False]
-        if len(replace_stride_with_dilation) != 3:
-            raise ValueError("replace_stride_with_dilation should be None "
-                             "or a 3-element tuple, got {}".format(replace_stride_with_dilation))
-        self.groups = groups
-        self.base_width = width_per_group
-        self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3,
-                               bias=False)
-        self.bn1 = norm_layer(self.inplanes)
-        self.relu = nn.ReLU(inplace=True)
-        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        self.layer1 = self._make_layer(block, 64, 2)
-        self.layer2 = self._make_layer(block, 128, 2, stride=2,
-                                       dilate=replace_stride_with_dilation[0])
-        self.layer3 = self._make_layer(block, 256, 2, stride=2,
-                                       dilate=replace_stride_with_dilation[1])
-        self.layer4 = self._make_layer(block, 512, 2, stride=2,
-                                       dilate=replace_stride_with_dilation[2])
-        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(512 * block.expansion, num_classes)
-
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-            elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
-
-    def _make_layer(self, block, planes, blocks, stride=1, dilate=False):
-        norm_layer = self._norm_layer
-        downsample = None
-        previous_dilation = self.dilation
-        if dilate:
-            self.dilation *= stride
-            stride = 1
-        if stride != 1 or self.inplanes != planes * block.expansion:
-            downsample = nn.Sequential(
-                conv1x1(self.inplanes, planes * block.expansion, stride),
-                norm_layer(planes * block.expansion),
-            )
-
-        layers = []
-        layers.append(block(self.inplanes, planes, stride, downsample, self.groups,
-                            self.base_width, previous_dilation, norm_layer))
-        self.inplanes = planes * block.expansion
-        for _ in range(1, blocks):
-            layers.append(block(self.inplanes, planes, groups=self.groups,
-                                base_width=self.base_width, dilation=self.dilation,
-                                norm_layer=norm_layer))
-
-        return nn.Sequential(*layers)
-
-    def _forward_impl(self, x):
-        # See note [TorchScript super()]
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu(x)
-        x = self.maxpool(x)
-
-        x = self.layer1(x)
-        x = self.layer2(x)
-        x = self.layer3(x)
-        x = self.layer4(x)
-
-        x = self.avgpool(x)
-        x = torch.flatten(x, 1)
-        x = self.fc(x)
-
-        return x
+class ResNet18(nn.Module):
+    def __init__(self, num_classes=1000):
+        super(ResNet18, self).__init__()
+        block = BasicBlock
+        self.r1 = ResNet1(block)
+        self.r2 = ResNet2(block)
+        self.r3 = ResNet3(block)
+        self.r4 = ResNet4(block, num_classes=num_classes)
 
     def forward(self, x):
-        return self._forward_impl(x)
+        x = self.r1(x)
+        x = self.r2(x)
+        x = self.r3(x)
+        x = self.r4(x)
+        return x
+
+# class ResNet5(nn.Module):
+#
+#     def __init__(self, block, num_classes=1000, zero_init_residual=False,
+#                  groups=1, width_per_group=64, replace_stride_with_dilation=None,
+#                  norm_layer=None):
+#         super(ResNet5, self).__init__()
+#         if norm_layer is None:
+#             norm_layer = nn.BatchNorm2d
+#         self._norm_layer = norm_layer
+#
+#         self.inplanes = 64
+#         self.dilation = 1
+#         if replace_stride_with_dilation is None:
+#             # each element in the tuple indicates if we should replace
+#             # the 2x2 stride with a dilated convolution instead
+#             replace_stride_with_dilation = [False, False, False]
+#         if len(replace_stride_with_dilation) != 3:
+#             raise ValueError("replace_stride_with_dilation should be None "
+#                              "or a 3-element tuple, got {}".format(replace_stride_with_dilation))
+#         self.groups = groups
+#         self.base_width = width_per_group
+#         self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3,
+#                                bias=False)
+#         self.bn1 = norm_layer(self.inplanes)
+#         self.relu = nn.ReLU(inplace=True)
+#         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+#         self.layer1 = self._make_layer(block, 64, 2)
+#         self.layer2 = self._make_layer(block, 128, 2, stride=2,
+#                                        dilate=replace_stride_with_dilation[0])
+#         self.layer3 = self._make_layer(block, 256, 2, stride=2,
+#                                        dilate=replace_stride_with_dilation[1])
+#         self.layer4 = self._make_layer(block, 512, 2, stride=2,
+#                                        dilate=replace_stride_with_dilation[2])
+#         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+#         self.fc = nn.Linear(512 * block.expansion, num_classes)
+#
+#         for m in self.modules():
+#             if isinstance(m, nn.Conv2d):
+#                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+#             elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
+#                 nn.init.constant_(m.weight, 1)
+#                 nn.init.constant_(m.bias, 0)
+#
+#     def _make_layer(self, block, planes, blocks, stride=1, dilate=False):
+#         norm_layer = self._norm_layer
+#         downsample = None
+#         previous_dilation = self.dilation
+#         if dilate:
+#             self.dilation *= stride
+#             stride = 1
+#         if stride != 1 or self.inplanes != planes * block.expansion:
+#             downsample = nn.Sequential(
+#                 conv1x1(self.inplanes, planes * block.expansion, stride),
+#                 norm_layer(planes * block.expansion),
+#             )
+#
+#         layers = []
+#         layers.append(block(self.inplanes, planes, stride, downsample, self.groups,
+#                             self.base_width, previous_dilation, norm_layer))
+#         self.inplanes = planes * block.expansion
+#         for _ in range(1, blocks):
+#             layers.append(block(self.inplanes, planes, groups=self.groups,
+#                                 base_width=self.base_width, dilation=self.dilation,
+#                                 norm_layer=norm_layer))
+#
+#         return nn.Sequential(*layers)
+#
+#     def _forward_impl(self, x):
+#         # See note [TorchScript super()]
+#         x = self.conv1(x)
+#         x = self.bn1(x)
+#         x = self.relu(x)
+#         x = self.maxpool(x)
+#
+#         x = self.layer1(x)
+#         x = self.layer2(x)
+#         x = self.layer3(x)
+#         x = self.layer4(x)
+#
+#         x = self.avgpool(x)
+#         x = torch.flatten(x, 1)
+#         x = self.fc(x)
+#
+#         return x
+#
+#     def forward(self, x):
+#         return self._forward_impl(x)
+
 

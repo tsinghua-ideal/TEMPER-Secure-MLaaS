@@ -167,7 +167,7 @@ class ModelSet:
         :param blocks_params: A list of set of (model, input shape, parameter size, latency). Default: null
         """
         if unit is None:
-            unit = [conv_block, separable_conv_block, BasicBlock, nn.Dropout, nn.Linear]
+            unit = [conv_block, separable_conv_block, BasicBlock]
         if blocks_params is None:
             blocks_params = []
         self.unit = unit
@@ -187,7 +187,7 @@ class ModelSet:
         self.model = model
         self.input_size = input_size
         if unit is None:
-            unit = [conv_block, separable_conv_block, BasicBlock]
+            unit = [conv_block, separable_conv_block, BasicBlock, Classifier]
         self.unit = unit
         if blocks_params is None:
             blocks_params = []
@@ -202,6 +202,10 @@ class ModelSet:
         bp = []
         for layer in self.model.modules():
             for block in self.unit:
+                # if isinstance(layer, Classifier):
+                #     _, total_params = profile(layer, (input_tensor,), verbose=False)
+                #     bp.append((layer, input_tensor.shape, float(total_params * 4. / (1024 ** 2.))))
+                #     input_tensor = layer(input_tensor)
                 if isinstance(layer, block):
                     _, total_params = profile(layer, (input_tensor,), verbose=False)
                     bp.append((layer, input_tensor.shape, float(total_params * 4. / (1024 ** 2.))))
@@ -248,14 +252,16 @@ class Partition:
     class Node: index, latency(from last unparted one to the current one.
     """
 
-    def __init__(self, block_params=None, upper_params_size=None):
+    def __init__(self, block_params=None, upper_params_size=None, transition_cost=3):
         """
 
         :param block_params: A list of set of (model, input shape, parameter size, latency). Default: null
         :param upper_params_size:
+        :param transition_cost: The cost between  different inferring applications(enclaves). Default: 3 ms
         """
         self.block_params = block_params
         self.upper_params_size = upper_params_size
+        self.transition_cost = transition_cost
         self.look_up_table = []
         self.search_tree = []
         for i in range(len(block_params)):
@@ -304,7 +310,7 @@ class Partition:
         if not latency_n_plus_one:
             latency_n_plus_one = calculate_latency(model_n_plus_one, torch.randn(input_shape))
             self.look_up_table.append({tuple(partition_n_plus_one): latency_n_plus_one})
-        if latency_n + self.block_params[n_plus_one][-1] > latency_n_plus_one:
+        if latency_n + self.block_params[n_plus_one][-1] + self.transition_cost > latency_n_plus_one:
             return True
         else:
             return False
@@ -366,7 +372,7 @@ class Partition:
                 key = tuple(reversed(key))
                 la = self.lookup(key)
                 if la:
-                    total += la
+                    total += (la + self.transition_cost)
                 else:
                     total_latency.append(10000)
                     continue
@@ -374,9 +380,11 @@ class Partition:
         total_latency = np.array(total_latency, dtype='float64')
         result = latency[np.argmin(total_latency)]
         print(result)
-        for slice in result:
-            slice = tuple(reversed(slice))
+        # for slice in result:
+        #     slice = tuple(reversed(slice))
 
+
+    # def generate_config(self):
 
 
 if __name__ == '__main__':
@@ -389,16 +397,17 @@ if __name__ == '__main__':
     #     print(layers_params)
     # import torchvision.models as models
 
-    model = mobilenet(1000)
+    # model = mobilenet(1000)
+    model = ResNet18(1000)
     # # model = ResNet1(BasicBlock, 10)
     # # model = nn.Sequential(mobilenet1(), mobilenet2(), mobilenet3())
-    ms = ModelSet(model, (1, 3, 224, 224))
-    ms.run(70)
+    # ms = ModelSet(model, (1, 3, 224, 224))
+    # ms.run(70)
     import pickle
-    with open('modelset.o', 'wb') as f:
-        pickle.dump(ms, f)
-    # with open('modelset.o', 'rb') as f:
-    #     ms = pickle.load(f)
+    # with open('modelset.o', 'wb') as f:
+    #     pickle.dump(ms, f)
+    with open('modelset.o', 'rb') as f:
+        ms = pickle.load(f)
     pt = Partition(ms.blocks_params)
     del ms
     pt.binary_partition()
