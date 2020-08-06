@@ -15,7 +15,7 @@ input_tensor = torch.randn(shape[1])
 model = ResNet1(BasicBlock, 10)
 # model = models.mobilenet_v2()
 # model = mobilenet1()
-
+model = models.inception_v3()
 # torchsummary calculation
 summary(model, (input_tensor.shape[1], input_tensor.shape[2], input_tensor.shape[3]))
 # hl.build_graph(model, input_tensor)

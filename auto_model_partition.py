@@ -13,47 +13,6 @@ from os import path as osp
 import subprocess
 
 
-class Node:
-    def __init__(self, index, latency=None):
-        self.index = index
-        self.latency = latency
-
-
-class BinaryTree:
-    def __init__(self, rootObj):
-        self.key = rootObj
-        self.leftChild = None
-        self.rightChild = None
-
-    def insertLeft(self, newNode):
-        if self.leftChild is None:
-            self.leftChild = BinaryTree(newNode)
-        else:
-            t = BinaryTree(newNode)
-            t.leftChild = self.leftChild
-            self.leftChild = t
-
-    def insertRight(self, newNode):
-        if self.rightChild is None:
-            self.rightChild = BinaryTree(newNode)
-        else:
-            t = BinaryTree(newNode)
-            t.rightChild = self.rightChild
-            self.rightChild = t
-
-    def getRightChild(self):
-        return self.rightChild
-
-    def getLeftChild(self):
-        return self.leftChild
-
-    def setRootVal(self, obj):
-        self.key = obj
-
-    def getRootVal(self):
-        return self.key
-
-
 def isRightChild(index):
     if (index - 1) % 2 == 1:
         return True
@@ -267,6 +226,14 @@ class Partition:
         for i in range(len(block_params)):
             self.look_up_table.append({(i,): block_params[i][3]})
 
+    def cal_transition_cost(self, data_size):
+        """
+        calculate the possible transition cost of given data. latency = size
+        :param data_size:
+        :return:
+        """
+        return data_size
+
     def lookup(self, key):
         """
         look up the searched path.
@@ -372,10 +339,10 @@ class Partition:
                 key = tuple(reversed(key))
                 la = self.lookup(key)
                 if la:
-                    total += (la + self.transition_cost)
+                    # total += (la + self.transition_cost)
+                    total += la
                 else:
-                    total_latency.append(10000)
-                    continue
+                    total += 1000
             total_latency.append(total)
         total_latency = np.array(total_latency, dtype='float64')
         result = latency[np.argmin(total_latency)]
@@ -404,6 +371,12 @@ if __name__ == '__main__':
     # ms = ModelSet(model, (1, 3, 224, 224))
     # ms.run(70)
     import pickle
+
+    with open('partition.o', 'rb') as f:
+        pt = pickle.load(f)
+        pt.get_strategy()
+        # _torch2onnx(pt.block_params[0][0], torch.rand(1, 3, 224, 224))
+        # _onnx2tvm(torch.rand(1, 3, 224, 224), build_dir='model/part0/')
     # with open('modelset.o', 'wb') as f:
     #     pickle.dump(ms, f)
     with open('modelset.o', 'rb') as f:
