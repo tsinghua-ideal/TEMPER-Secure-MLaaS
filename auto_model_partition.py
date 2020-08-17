@@ -92,9 +92,10 @@ def _calculate_latency(input_size):
     """
     # note that dynamic path is preferred. Revise sgx-infer.sh to do this.
     ret = subprocess.run('source /home/lifabing/sgx/best-partion/inference/src/sgx-infer.sh ' + input_size, shell=True, stdout=subprocess.PIPE,
-                         stderr=subprocess.PIPE, encoding="utf-8", executable="/bin/bash", timeout=1000)
+                         stderr=subprocess.PIPE, encoding="utf-8", executable="/bin/bash", timeout=200)
     arr = ret.stdout.split('\n')[0:-1]
-    arr = np.array(arr, dtype='int')
+    print(arr)
+    arr = np.array(arr, dtype='float32')
     return arr.mean() / 1000
 
 

@@ -44,7 +44,8 @@
     let vec: Vec<&str> = path.collect();
     let a = vec[2].split("/");
     let vec: Vec<&str> = a.collect();
-    let shape = (vec[0].to_string().parse::<usize>().unwrap(), vec[1].to_string().parse::<usize>().unwrap(), vec[2].to_string().parse::<usize>().unwrap(), vec[3].to_string().parse::<usize>().unwrap());
+    
+    let sy_time = SystemTime::now();
 
     let syslib = tvm_runtime::SystemLibModule::default();
     let graph_json = include_str!(concat!(env!("OUT_DIR"), "/graph.json"));
@@ -54,23 +55,16 @@
     let graph = tvm_runtime::Graph::try_from(graph_json).unwrap();
     let mut exec = tvm_runtime::GraphExecutor::new(graph, &syslib).unwrap();
     exec.load_params(params);
+    println!("{:?}", SystemTime::now().duration_since(sy_time).unwrap().as_micros());
 
-    let mut rng =rand::thread_rng();
-    let mut ran = vec![];
-    for _i in 0..shape.0*shape.1*shape.2*shape.3{
-        ran.push(rng.gen::<f32>()*256.);
-    }
-    let x = Array::from_shape_vec(shape, ran).unwrap();
     // println!("{:#?}", &x);
     
-    let sy_time = SystemTime::now();
-    exec.set_input("input", x.into());
-    exec.run();
+    // exec.set_input("input", x.into());
+    // exec.run();
     // let output = exec.get_output(0).unwrap();
 
     // let output = output.to_vec::<f32>();
     // find the maximum entry in the output and its index
-    let duration = SystemTime::now().duration_since(sy_time).unwrap().as_micros();
     // let mut argmax = -1;
     // let mut max_prob = 0.;
     // // println!("{:?}", output.len());
@@ -81,7 +75,7 @@
     //     }
     // }
     // println!("It took {:?} us", duration);
-    println!("{:?}", duration);
+    // println!("{:?}", duration);
     // let ts1 = timestamp();
     // println!("TimeStamp: {}", ts1);
     // println!("The index: {:?}", argmax);
