@@ -104,8 +104,15 @@ if __name__ == '__main__':
     latency.extend(latency1)
     trans.extend(trans1)
     zipped = sorted(zip(params, latency, trans))
-    params, latency, trans = zip(*zipped)
+    news_li = [zipped[0]]
+    for i in zipped:
+        nn = news_li.copy()
+        p, _, _ = zip(*nn)
+        if i[0] not in p:
+            news_li.append(i)
+    params, latency, trans = zip(*news_li)
     poly_fit(params, latency, trans)
+    print(news_li)
 
     # ms = load('latency-mobilenet.o')
     # pt = Partition(ms.blocks_params)
