@@ -79,7 +79,7 @@ def _torch2tvm(torch_model, input_tensor):
     """
 
 
-def _calculate_latency(input_size):
+def _calculate_latency(input_size, heap_size):
     """
     Get the output of RUST application by Process Module. A external bash can be applied:
     #!/bin/bash
@@ -92,16 +92,18 @@ def _calculate_latency(input_size):
     :return: the latency
     """
     # note that dynamic path is preferred. Revise sgx-infer.sh to do this.
-    ret = subprocess.run('source /home/lifabing/sgx/best-partion/inference/src/sgx-infer.sh ' + input_size, shell=True, stdout=subprocess.PIPE,
-                         stderr=subprocess.PIPE, encoding="utf-8", executable="/bin/bash", timeout=1000)
+    ret = subprocess.run('source /home/lifabing/sgx/best-partion/inference/src/sgx-infer.sh ' + input_size + ' ' +
+                         str(heap_size), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8",
+                         executable="/bin/bash", timeout=1000)
     arr = ret.stdout.split('\n')[0:-1]
     arr = np.array(arr, dtype='int')
     return arr.mean() / 1000
 
 
-def calculate_latency(torch_model, input_tensor, onnx_model='temp.onnx', build_dir='./'):
+def calculate_latency(torch_model, input_tensor, heap_size=0x40, onnx_model='temp.onnx', build_dir='./'):
     """
     calculate the latency of given model.
+    :param heap_size:
     :param torch_model:
     :param input_tensor:
     :param onnx_model:
@@ -115,16 +117,16 @@ def calculate_latency(torch_model, input_tensor, onnx_model='temp.onnx', build_d
     _onnx2tvm(input_tensor, onnx_model=onnx_model, build_dir=build_dir)
     shape = input_tensor.shape
     shape = str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/'+str(shape[3])
-    return _calculate_latency(input_size=shape)
+    return _calculate_latency(input_size=shape, heap_size=heap_size)
 
 
 class ModelSet:
-    def __init__(self, model=None, input_size=None, unit=None, blocks_params=None):
+    def __init__(self, model=None, input_size=None, unit=None, blocks_params=None, expansion=6):
         """
         :param model: The model (An instance of torch.nn.Module)
         :param input_size: The input size of model input
         :param unit: The grain of partition. Default: conv_block, separable_conv_block, BasicBlock
-        :param blocks_params: A list of set of (model, input shape, parameter size, latency). Default: null
+        :param blocks_params: A list of set of (model, input shape, output shape, parameter size, latency). Default: null
         """
         if unit is None:
             unit = [conv_block, separable_conv_block, BasicBlock]
@@ -133,6 +135,7 @@ class ModelSet:
         self.unit = unit
         self.model = model
         self.blocks_params = blocks_params
+        self.expansion = expansion
         self.input_size = input_size
 
     def reinit(self, model, input_size, unit, blocks_params=None):
@@ -141,7 +144,7 @@ class ModelSet:
         :param model: The model (An instance of torch.nn.Module)
         :param input_size: The input size of model input
         :param unit: The grain of partition. Default: conv_block, separable_conv_block, BasicBlock
-        :param blocks_params: A list of set of (model, input shape, parameter size, latency). Default: null
+        :param blocks_params: A list of set of (model, input shape, output shape, parameter size, latency). Default: null
         :return: True if no exception
         """
         self.model = model
@@ -168,8 +171,9 @@ class ModelSet:
                 #     input_tensor = layer(input_tensor)
                 if isinstance(layer, block):
                     _, total_params = profile(layer, (input_tensor,), verbose=False)
-                    bp.append((layer, input_tensor.shape, float(total_params * 4. / (1024 ** 2.))))
+                    input_shape = input_tensor.shape
                     input_tensor = layer(input_tensor)
+                    bp.append((layer, input_shape, input_tensor.shape, float(total_params * 4. / (1024 ** 2.))))
                 # print(layer)
         self.blocks_params = bp
 
@@ -179,7 +183,7 @@ class ModelSet:
         :return:
         """
         for i in range(len(self.blocks_params)):
-            layer, shape, _ = self.blocks_params[i]
+            layer, shape, _, _ = self.blocks_params[i]
             # _torch2tvm(layer, torch.randn(shape))
             _torch2onnx(layer, torch.randn(shape))
             _onnx2tvm(torch.randn(shape))
@@ -190,8 +194,37 @@ class ModelSet:
     def get_block_params(self):
         return self.blocks_params
 
-    def partition(self, upper_params_size):
+    def partition(self):
         strategies = []
+        total_latency = 0
+        input_shape = self.blocks_params[0][1]
+        model = self.blocks_params[0][0]
+        partition = [0]
+        for i in range(1, len(self.blocks_params)):
+            fused_model = nn.Sequential(model, self.blocks_params[i][0])
+            # Set heap size of program
+            # Calculate largest intermediate data
+            intermediate = [0]
+            for index in partition:
+                size = self.blocks_params[index][1]
+                intermediate.append(size[0]*size[1]*size[2]*size[3]*4/1024/1024)
+            size = self.blocks_params[i][1]
+            intermediate.append(size[0] * size[1] * size[2] * size[3] * 4 / 1024 / 1024)
+            size = self.blocks_params[i][2]
+            intermediate.append(size[0] * size[1] * size[2] * size[3] * 4 / 1024 / 1024)
+            min_heap = math.ceil(self.blocks_params[i][-2] + max(intermediate) + self.expansion)
+            latency_n = calculate_latency(fused_model, torch.rand(input_shape), min_heap)
+            if abs(total_latency + self.blocks_params[i][-1] - latency_n) / (total_latency + self.blocks_params[i][-1]) < 0.1:
+                total_latency = latency_n
+                partition.append(i)
+                model = fused_model
+            else:
+                strategies.append(partition)
+                partition = []
+                total_latency = self.blocks_params[i][-1]
+                model = self.blocks_params[i][0]
+                input_shape = self.blocks_params[i][1]
+            print(strategies)
         return strategies
 
     def run(self, upper_params_size):
@@ -385,12 +418,13 @@ if __name__ == '__main__':
     model = ResNet18(1000)
     with open('modelset.o', 'rb') as f:
         ms = pickle.load(f)
-    pt = Partition(ms.blocks_params)
-    with open('partition.o', 'rb') as f:
-        pt = pickle.load(f)
-        pt.get_strategy()
-        # _torch2onnx(pt.block_params[0][0], torch.rand(1, 3, 224, 224))
-        # _onnx2tvm(torch.rand(1, 3, 224, 224), build_dir='model/part0/')
+        print(ms.partition())
+    # pt = Partition(ms.blocks_params)
+    # with open('partition.o', 'rb') as f:
+    #     pt = pickle.load(f)
+    #     pt.get_strategy()
+    #     # _torch2onnx(pt.block_params[0][0], torch.rand(1, 3, 224, 224))
+    #     # _onnx2tvm(torch.rand(1, 3, 224, 224), build_dir='model/part0/')
 
 
 
