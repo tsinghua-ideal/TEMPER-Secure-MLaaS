@@ -13,7 +13,7 @@ input_tensor = torch.randn(shape[1])
 # model = VGG('VGG19')
 # model = one_layer()
 model = ResNet1(BasicBlock, 10)
-# model = models.mobilenet_v2()
+# model = models.resnet50()
 # model = mobilenet1()
 model = models.inception_v3()
 # torchsummary calculation

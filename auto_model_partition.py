@@ -6,6 +6,8 @@ from thop import profile
 
 import math
 import numpy as np
+from torchvision.models.resnet import Bottleneck
+
 from self_defined_nn import *
 
 import os
@@ -79,7 +81,7 @@ def _torch2tvm(torch_model, input_tensor):
     """
 
 
-def _calculate_latency(input_size, heap_size):
+def _calculate_latency(input_size, heap_size=0x40):
     """
     Get the output of RUST application by Process Module. A external bash can be applied:
     #!/bin/bash
@@ -129,7 +131,7 @@ class ModelSet:
         :param blocks_params: A list of set of (model, input shape, output shape, parameter size, latency). Default: null
         """
         if unit is None:
-            unit = [conv_block, separable_conv_block, BasicBlock]
+            unit = [conv_block, separable_conv_block, BasicBlock, Bottleneck]
         if blocks_params is None:
             blocks_params = []
         self.unit = unit
@@ -198,10 +200,12 @@ class ModelSet:
         strategies = []
         total_latency = 0
         input_shape = self.blocks_params[0][1]
-        model = self.blocks_params[0][0]
+        layers = self.blocks_params[0][0]
+        params = self.blocks_params[0][-2]
         partition = [0]
         for i in range(1, len(self.blocks_params)):
-            fused_model = nn.Sequential(model, self.blocks_params[i][0])
+            fused_model = nn.Sequential(layers, self.blocks_params[i][0])
+            params += self.blocks_params[i][-2]
             # Set heap size of program
             # Calculate largest intermediate data
             intermediate = [0]
@@ -212,18 +216,22 @@ class ModelSet:
             intermediate.append(size[0] * size[1] * size[2] * size[3] * 4 / 1024 / 1024)
             size = self.blocks_params[i][2]
             intermediate.append(size[0] * size[1] * size[2] * size[3] * 4 / 1024 / 1024)
-            min_heap = math.ceil(self.blocks_params[i][-2] + max(intermediate) + self.expansion)
+            min_heap = math.ceil(params + max(intermediate) + self.expansion)
             latency_n = calculate_latency(fused_model, torch.rand(input_shape), min_heap)
             if abs(total_latency + self.blocks_params[i][-1] - latency_n) / (total_latency + self.blocks_params[i][-1]) < 0.1:
                 total_latency = latency_n
                 partition.append(i)
-                model = fused_model
+                layers = fused_model
             else:
-                strategies.append(partition)
-                partition = []
+                # Avoid shallow copy
+                import copy
+                strategies.append(partition.copy())
+                partition = [i]
                 total_latency = self.blocks_params[i][-1]
-                model = self.blocks_params[i][0]
+                layers = self.blocks_params[i][0]
                 input_shape = self.blocks_params[i][1]
+                params = self.blocks_params[i][-2]
+            strategies.append(partition)
             print(strategies)
         return strategies
 
@@ -238,156 +246,6 @@ class ModelSet:
             self._get_block_latency()
 
 
-class Partition:
-    """
-    We can organize the strategies as an tree. Take the index of block as nodes and each node in the layer has two
-    choices: partition or not. We can just travel the tree to find the possible strategies and total latency.
-    class Node: index, latency(from last unparted one to the current one.
-    """
-
-    def __init__(self, block_params=None, upper_params_size=None, transition_cost=3):
-        """
-
-        :param block_params: A list of set of (model, input shape, parameter size, latency). Default: null
-        :param upper_params_size:
-        :param transition_cost: The cost between  different inferring applications(enclaves). Default: 3 ms
-        """
-        self.block_params = block_params
-        self.upper_params_size = upper_params_size
-        self.transition_cost = transition_cost
-        self.look_up_table = []
-        self.search_tree = []
-        for i in range(len(block_params)):
-            self.look_up_table.append({(i,): block_params[i][3]})
-
-    def cal_transition_cost(self, data_size):
-        """
-        calculate the possible transition cost of given data. latency = size
-        :param data_size:
-        :return:
-        """
-        return data_size
-
-    def lookup(self, key):
-        """
-        look up the searched path.
-        :return:
-        """
-        for parted in self.look_up_table:
-            if key in parted:
-                return parted[key]
-        return None
-
-    def travel_for_block(self, index):
-        """
-        travel the tree for a block to fuse
-        :param index:
-        :return: A fused model
-        """
-        # To be filled
-        nearestPartition = getNearPartition(index)
-        nearestPartition.reverse()
-        input_shape = self.block_params[nearestPartition[0]][1]
-        fused_model = self.block_params[nearestPartition[0]][0]
-        for i in range(1, len(nearestPartition)):
-            fused_model = nn.Sequential(fused_model, self.block_params[nearestPartition[i]][0])
-        return input_shape, fused_model, nearestPartition
-
-    def partition_rule(self, index):
-        n_plus_one = int(math.log2(index+1) + 1)
-        if len(self.block_params) < n_plus_one:
-            return False
-        input_shape, model_n, partition = self.travel_for_block(index)
-        model_n_plus_one = nn.Sequential(model_n, self.block_params[n_plus_one][0])
-
-        latency_n = self.lookup(tuple(partition))
-        import copy
-        partition_n_plus_one = copy.copy(partition)
-        partition_n_plus_one.append(n_plus_one)
-        latency_n_plus_one = self.lookup(tuple(partition_n_plus_one))
-        if not latency_n:
-            latency_n = calculate_latency(model_n, torch.randn(input_shape))
-            self.look_up_table.append({tuple(partition): latency_n})
-        if not latency_n_plus_one:
-            latency_n_plus_one = calculate_latency(model_n_plus_one, torch.randn(input_shape))
-            self.look_up_table.append({tuple(partition_n_plus_one): latency_n_plus_one})
-        if latency_n + self.block_params[n_plus_one][-1] + self.transition_cost > latency_n_plus_one:
-            return True
-        else:
-            return False
-
-    def binary_partition(self):
-        """
-        Maybe recursive function is helpful for coding. However, how to record the search path?
-        Partition rule: if Latency_(1..n)≤Latency_(1..n-1)+ Latency_(n), do partition.
-        1) Partition on B1 and B2, then for B1 ,look up the Latency Table and applied the partition rule.
-        if there is only one block, calculate it;
-        for B2,
-            1. calculate total param_size, if is greater than upper_params_size, do partition.
-            2. else applied the partition rule.
-            3. else stop partition
-        :return:
-        """
-        self.search_tree = np.zeros(2 ** len(self.block_params) - 1)
-        self.search_tree[0] = 1
-        for i in range(2 ** (len(self.block_params)-1) - 1):
-            if self.search_tree[i] == 0:
-                continue
-            if self.partition_rule(i):
-                # add left child
-                self.search_tree[2 * i + 1] = 1
-            # add right child
-            self.search_tree[2 * i + 2] = 1
-
-    def get_strategy(self):
-        """
-        seems to have some problems on look up the key, so i set the unknown result to 10000
-        :return:
-        """
-        # print(self.look_up_table)
-        latency = []
-        for i in range(2 ** (len(self.block_params)-1) - 1, 2 ** len(self.block_params) - 1):
-            if self.search_tree[i] == 0:
-                continue
-            else:
-                strategy = []
-                part = ()
-                index = i
-                while index is not 0:
-                    layer_n = int(math.log2(index + 1))
-                    part = part + (layer_n,)
-                    if isRightChild(index):
-                        strategy.append(part)
-                        part = ()
-                    if index is 1:
-                        strategy[-1] = strategy[-1] + (0,)
-                    if index is 2:
-                        strategy.append((0,))
-                    index = int((index - 1) / 2)
-                latency.append(strategy)
-        print(latency)
-        total_latency = []
-        for lt in latency:
-            total = 0
-            for key in lt:
-                key = tuple(reversed(key))
-                la = self.lookup(key)
-                if la:
-                    # total += (la + self.transition_cost)
-                    total += la
-                else:
-                    total += 1000
-            total_latency.append(total)
-        total_latency = np.array(total_latency, dtype='float64')
-        result = latency[np.argmin(total_latency)]
-        print(result)
-        # for slice in result:
-        #     slice = tuple(reversed(slice))
-
-
-    # def generate_config(self):
-
-
 if __name__ == '__main__':
     #     shape = [(1, 3, 224, 224), (1, 3, 150, 150), (1, 32, 75, 75)]
     #     input_tensor = torch.randn(shape[1])
@@ -399,26 +257,24 @@ if __name__ == '__main__':
     # import torchvision.models as models
 
     # do a new partition
-    # # model = mobilenet(1000)
+    model = mobilenet(1000)
     # model = ResNet18(1000)
-    # # model = ResNet1(BasicBlock, 10)
-    # # model = nn.Sequential(mobilenet1(), mobilenet2(), mobilenet3())
-    # ms = ModelSet(model, (1, 3, 224, 224))
-    # ms.run(70)
-    # with open('modelset.o', 'wb') as f:
-    #     pickle.dump(ms, f)
-    # pt = Partition(ms.blocks_params)
-    # del ms
-    # pt.binary_partition()
-    # pt.get_strategy()
-    # with open('partition.o', 'wb') as f:
-    #     pickle.dump(pt, f)
+    # model = ResNet1(BasicBlock, 10)
+    # model = nn.Sequential(mobilenet1(), mobilenet2(), mobilenet3())
+    # import torchvision.models as models
+    # model = models.resnet50(pretrained=False)
+    ms = ModelSet(model, (1, 3, 224, 224))
+    ms.run(70)
+    print(ms.partition())
+    with open('modelset.o', 'wb') as f:
+        pickle.dump(ms, f)
 
     # look up for an old partition
-    model = ResNet18(1000)
-    with open('modelset.o', 'rb') as f:
-        ms = pickle.load(f)
-        print(ms.partition())
+    # model = ResNet18(1000)
+    # with open('modelset.o', 'rb') as f:
+    #     ms = pickle.load(f)
+    #     ms.expansion = 12
+    #     print(ms.partition())
     # pt = Partition(ms.blocks_params)
     # with open('partition.o', 'rb') as f:
     #     pt = pickle.load(f)
