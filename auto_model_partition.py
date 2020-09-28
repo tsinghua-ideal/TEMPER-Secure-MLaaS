@@ -97,6 +97,12 @@ def _calculate_latency(input_size, heap_size=0x40):
     ret = subprocess.run('source /home/lifabing/sgx/best-partion/inference/src/sgx-infer.sh ' + input_size + ' ' +
                          str(heap_size), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8",
                          executable="/bin/bash", timeout=1000)
+    while ret.stdout.startswith('Attaching debugger'):
+        heap_size += 4
+        ret = subprocess.run('source /home/lifabing/sgx/best-partion/inference/src/sgx-infer.sh ' + input_size + ' ' +
+                             str(heap_size), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             encoding="utf-8",
+                             executable="/bin/bash", timeout=1000)
     arr = ret.stdout.split('\n')[0:-1]
     arr = np.array(arr, dtype='int')
     return arr.mean() / 1000
@@ -139,6 +145,7 @@ class ModelSet:
         self.blocks_params = blocks_params
         self.expansion = expansion
         self.input_size = input_size
+        self.strategy = None
 
     def reinit(self, model, input_size, unit, blocks_params=None):
         """
@@ -231,9 +238,30 @@ class ModelSet:
                 layers = self.blocks_params[i][0]
                 input_shape = self.blocks_params[i][1]
                 params = self.blocks_params[i][-2]
-            strategies.append(partition)
-            print(strategies)
+        strategies.append(partition)
+        print(strategies)
+        self.strategy = strategies
         return strategies
+
+    def generate_model(self, build_dir='model/'):
+        idx = 0
+        for stg in self.strategy:
+            model = self.blocks_params[stg[0]][0]
+            input_size = self.blocks_params[stg[0]][1]
+            if len(stg) > 1:
+                for index in range(1, len(stg)):
+                    model = nn.Sequential(model, self.blocks_params[stg[index]][0])
+            _torch2onnx(model, torch.rand(input_size))
+            path = osp.join(build_dir, 'part' + str(stg[0]))
+            if not osp.exists(path):
+                os.makedirs(path)
+            _onnx2tvm(torch.rand(input_size), build_dir=path)
+
+            _onnx2tvm(torch.rand(input_size), build_dir='./')
+            print('Block latency: ', _calculate_latency(str(input_size[0]) + '/' + str(input_size[1]) + '/' +
+                                                        str(input_size[2]) + '/'+str(input_size[3])))
+            print('Writing model into ' + path)
+            idx += 1
 
     def run(self, upper_params_size):
         """
@@ -257,30 +285,32 @@ if __name__ == '__main__':
     # import torchvision.models as models
 
     # do a new partition
-    model = mobilenet(1000)
+    # model = mobilenet(1000)
     # model = ResNet18(1000)
     # model = ResNet1(BasicBlock, 10)
     # model = nn.Sequential(mobilenet1(), mobilenet2(), mobilenet3())
     # import torchvision.models as models
     # model = models.resnet50(pretrained=False)
-    ms = ModelSet(model, (1, 3, 224, 224))
-    ms.run(70)
-    print(ms.partition())
-    with open('modelset.o', 'wb') as f:
-        pickle.dump(ms, f)
+    # model = ResNet(Bottleneck, [3, 4, 6, 3])
+    # ms = ModelSet(model, (1, 3, 224, 224))
+    # ms.run(70)
+    # print(ms.partition())
+    # with open('modelset.o', 'wb') as f:
+    #     pickle.dump(ms, f)
 
     # look up for an old partition
-    # model = ResNet18(1000)
-    # with open('modelset.o', 'rb') as f:
-    #     ms = pickle.load(f)
-    #     ms.expansion = 12
-    #     print(ms.partition())
-    # pt = Partition(ms.blocks_params)
-    # with open('partition.o', 'rb') as f:
-    #     pt = pickle.load(f)
-    #     pt.get_strategy()
-    #     # _torch2onnx(pt.block_params[0][0], torch.rand(1, 3, 224, 224))
-    #     # _onnx2tvm(torch.rand(1, 3, 224, 224), build_dir='model/part0/')
+    with open('modelset.o', 'rb') as f:
+        ms = pickle.load(f)
+        # ms.expansion = 12
+        s = []
+        for i in ms.strategy:
+            if i not in s:
+                s.append(i)
+        ms.strategy = s
+        print(ms.strategy)
+        ms.generate_model('model/resnet50')
+        # _torch2onnx(ms.block_params[0][0], torch.rand(1, 3, 224, 224))
+        # _onnx2tvm(torch.rand(1, 3, 224, 224), build_dir='model/part0/')
 
 
 
