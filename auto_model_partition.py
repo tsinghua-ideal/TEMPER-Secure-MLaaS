@@ -204,6 +204,10 @@ class ModelSet:
         return self.blocks_params
 
     def partition(self):
+        """
+        Partition rule: if latency_(𝑖..𝑗) + latency_(𝑗+1) + Min{load(params), trans(data)}  < latency_(𝑖..𝑗+1)
+        :return:
+        """
         strategies = []
         total_latency = 0
         input_shape = self.blocks_params[0][1]
@@ -220,12 +224,17 @@ class ModelSet:
                 size = self.blocks_params[index][1]
                 intermediate.append(size[0]*size[1]*size[2]*size[3]*4/1024/1024)
             size = self.blocks_params[i][1]
-            intermediate.append(size[0] * size[1] * size[2] * size[3] * 4 / 1024 / 1024)
+            size_in = size[0] * size[1] * size[2] * size[3] * 4 / 1024 / 1024
+            intermediate.append(size_in)
             size = self.blocks_params[i][2]
-            intermediate.append(size[0] * size[1] * size[2] * size[3] * 4 / 1024 / 1024)
+            size_out = size[0] * size[1] * size[2] * size[3] * 4 / 1024 / 1024
+            intermediate.append(size_out)
             min_heap = math.ceil(params + max(intermediate) + self.expansion)
             latency_n = calculate_latency(fused_model, torch.rand(input_shape), min_heap)
-            if abs(total_latency + self.blocks_params[i][-1] - latency_n) / (total_latency + self.blocks_params[i][-1]) < 0.1:
+            if i == (len(self.blocks_params) - 1):
+                size_out = 0
+            if abs(total_latency + self.blocks_params[i][-1] + 20*size_in - 20*size_out - latency_n) \
+                    / (total_latency + self.blocks_params[i][-1] + 20*size_in) < 0.1:
                 total_latency = latency_n
                 partition.append(i)
                 layers = fused_model
@@ -272,6 +281,8 @@ class ModelSet:
         if not self.blocks_params:
             self._stat_layer_params()
             self._get_block_latency()
+            print('partition')
+            self.partition()
 
 
 if __name__ == '__main__':
@@ -294,12 +305,11 @@ if __name__ == '__main__':
     # model = ResNet(Bottleneck, [3, 4, 6, 3])
     # ms = ModelSet(model, (1, 3, 224, 224))
     # ms.run(70)
-    # print(ms.partition())
     # with open('modelset.o', 'wb') as f:
     #     pickle.dump(ms, f)
 
     # look up for an old partition
-    with open('modelset.o', 'rb') as f:
+    with open('mobilenetv1-1.o', 'rb') as f:
         ms = pickle.load(f)
         # ms.expansion = 12
         s = []
@@ -308,7 +318,7 @@ if __name__ == '__main__':
                 s.append(i)
         ms.strategy = s
         print(ms.strategy)
-        ms.generate_model('model/resnet50')
+        ms.generate_model('model/mobilenetv1')
         # _torch2onnx(ms.block_params[0][0], torch.rand(1, 3, 224, 224))
         # _onnx2tvm(torch.rand(1, 3, 224, 224), build_dir='model/part0/')
 
