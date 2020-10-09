@@ -12,8 +12,8 @@ export PATH=$1:$PATH
 cargo clean
 cargo run 2>>/dev/null
 path=target/x86_64-fortanix-unknown-sgx/debug/sgx-demo.sgxs
-#for j in {0..20};
-#do
-#	ftxsgx-runner ${path}
-#done
+for j in {0..20};
+do
+	ftxsgx-runner ${path}
+done
 export PATH=$s

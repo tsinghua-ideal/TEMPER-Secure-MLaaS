@@ -261,7 +261,7 @@ class ModelSet:
                 for index in range(1, len(stg)):
                     model = nn.Sequential(model, self.blocks_params[stg[index]][0])
             _torch2onnx(model, torch.rand(input_size))
-            path = osp.join(build_dir, 'part' + str(stg[0]))
+            path = osp.join(build_dir, 'part' + str(idx))
             if not osp.exists(path):
                 os.makedirs(path)
             _onnx2tvm(torch.rand(input_size), build_dir=path)
@@ -272,10 +272,9 @@ class ModelSet:
             print('Writing model into ' + path)
             idx += 1
 
-    def run(self, upper_params_size):
+    def run(self):
         """
         find the strategies of partition
-        :param upper_params_size: The maximum size of parameter size
         :return: An generator of strategies of partitions
         """
         if not self.blocks_params:
@@ -302,23 +301,23 @@ if __name__ == '__main__':
     # model = nn.Sequential(mobilenet1(), mobilenet2(), mobilenet3())
     # import torchvision.models as models
     # model = models.resnet50(pretrained=False)
-    # model = ResNet(Bottleneck, [3, 4, 6, 3])
-    # ms = ModelSet(model, (1, 3, 224, 224))
-    # ms.run(70)
-    # with open('modelset.o', 'wb') as f:
-    #     pickle.dump(ms, f)
+    model = ResNet(Bottleneck, [3, 4, 6, 3])
+    ms = ModelSet(model, (1, 3, 224, 224))
+    ms.run()
+    with open('modelset.o', 'wb') as f:
+        pickle.dump(ms, f)
 
     # look up for an old partition
-    with open('mobilenetv1-1.o', 'rb') as f:
-        ms = pickle.load(f)
-        # ms.expansion = 12
-        s = []
-        for i in ms.strategy:
-            if i not in s:
-                s.append(i)
-        ms.strategy = s
-        print(ms.strategy)
-        ms.generate_model('model/mobilenetv1')
+    # with open('mobilenetv1-1.o', 'rb') as f:
+    #     ms = pickle.load(f)
+    #     # ms.expansion = 12
+    #     s = []
+    #     for i in ms.strategy:
+    #         if i not in s:
+    #             s.append(i)
+    #     ms.strategy = s
+    #     print(ms.strategy)
+    #     ms.generate_model('model/mobilenetv1')
         # _torch2onnx(ms.block_params[0][0], torch.rand(1, 3, 224, 224))
         # _onnx2tvm(torch.rand(1, 3, 224, 224), build_dir='model/part0/')
 
