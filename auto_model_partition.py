@@ -33,7 +33,7 @@ def getNearPartition(index):
     if index == 0:
         return partition
     else:
-        index = int((index-1)/2)
+        index = int((index - 1) / 2)
         while not isRightChild(index):
             partition.append(int(math.log2(index + 1)))
             index = int((index - 1) / 2)
@@ -124,17 +124,17 @@ def calculate_latency(torch_model, input_tensor, heap_size=0x40, onnx_model='tem
     _torch2onnx(torch_model, input_tensor)
     _onnx2tvm(input_tensor, onnx_model=onnx_model, build_dir=build_dir)
     shape = input_tensor.shape
-    shape = str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/'+str(shape[3])
+    shape = str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3])
     return _calculate_latency(input_size=shape, heap_size=heap_size)
 
 
 class ModelSet:
-    def __init__(self, model=None, input_size=None, unit=None, blocks_params=None, expansion=6):
+    def __init__(self, model=None, input_size=None, unit=None, blocks_params=None, expansion=6, balance_point=42):
         """
         :param model: The model (An instance of torch.nn.Module)
         :param input_size: The input size of model input
         :param unit: The grain of partition. Default: conv_block, separable_conv_block, BasicBlock
-        :param blocks_params: A list of set of (model, input shape, output shape, parameter size, latency). Default: null
+        :param blocks_params: A list of set of (model, input shape, output shape, parameter size, latency_origin, latency_step). Default: null
         """
         if unit is None:
             unit = [conv_block, separable_conv_block, BasicBlock, Bottleneck]
@@ -142,9 +142,10 @@ class ModelSet:
             blocks_params = []
         self.unit = unit
         self.model = model
+        self.input_size = input_size
         self.blocks_params = blocks_params
         self.expansion = expansion
-        self.input_size = input_size
+        self.balance_point = balance_point
         self.strategy = None
 
     def reinit(self, model, input_size, unit, blocks_params=None):
@@ -153,7 +154,7 @@ class ModelSet:
         :param model: The model (An instance of torch.nn.Module)
         :param input_size: The input size of model input
         :param unit: The grain of partition. Default: conv_block, separable_conv_block, BasicBlock
-        :param blocks_params: A list of set of (model, input shape, output shape, parameter size, latency). Default: null
+        :param blocks_params: A list of set of (model, input shape, output shape, parameter size, latency_origin, latency_step). Default: null
         :return: True if no exception
         """
         self.model = model
@@ -197,7 +198,13 @@ class ModelSet:
             _torch2onnx(layer, torch.randn(shape))
             _onnx2tvm(torch.randn(shape))
 
-            blocks_latency = (_calculate_latency(str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/'+str(shape[3])),)
+            blocks_latency = (
+                _calculate_latency(str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3]),
+                                   heap_size=self.balance_point),)
+            self.blocks_params[i] = self.blocks_params[i] + blocks_latency
+            blocks_latency = (
+                _calculate_latency(str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3]),
+                                   heap_size=160),)
             self.blocks_params[i] = self.blocks_params[i] + blocks_latency
 
     def get_block_params(self):
@@ -205,52 +212,47 @@ class ModelSet:
 
     def partition(self):
         """
-        Partition rule: if latency_(𝑖..𝑗) + latency_(𝑗+1) + Min{load(params), trans(data)}  < latency_(𝑖..𝑗+1)
+        Dynamic programming is applied to this problem now.
+        state transition equation:
+            f(n)=min{f(n−1)+L(n)+T(n),f(0)+L(0⋅⋯n)+T(0),f(1)+L(1⋅⋯n)+T(1),…f(n−1)+L(n−1⋅⋯n)+T(n−1)}
+        The L function represents the actual running time, and the T function represents the transmission overhead
+        partition_flag: record the partition point and judge whether transition or loading parameters
+        policy:  record the policy of n
         :return:
         """
-        strategies = []
-        total_latency = 0
-        input_shape = self.blocks_params[0][1]
-        layers = self.blocks_params[0][0]
-        params = self.blocks_params[0][-2]
-        partition = [0]
-        for i in range(1, len(self.blocks_params)):
-            fused_model = nn.Sequential(layers, self.blocks_params[i][0])
-            params += self.blocks_params[i][-2]
-            # Set heap size of program
-            # Calculate largest intermediate data
-            intermediate = [0]
-            for index in partition:
-                size = self.blocks_params[index][1]
-                intermediate.append(size[0]*size[1]*size[2]*size[3]*4/1024/1024)
+        layers_n = len(self.blocks_params)
+        latency = [[-1 for i in range(layers_n)] for i in range(layers_n)]
+        for i in range(0, layers_n):
+            for j in range(i+1, layers_n):
+                total_params = 0
+                for idx in range(i, j):
+                    total_params += self.blocks_params[idx][3]
+                if total_params > 42:
+                    for idx in range(i, j):
+                        latency[i][j] += self.blocks_params[idx][5]
+                else:
+                    for idx in range(i, j):
+                        latency[i][j] += self.blocks_params[idx][4]
+        partition_flag = [[0 for i in range(layers_n)] for i in range(layers_n)]
+        func = [-1 for i in range(layers_n)]
+        func[0] = latency[0][1]
+        for i in range(1, layers_n):
             size = self.blocks_params[i][1]
-            size_in = size[0] * size[1] * size[2] * size[3] * 4 / 1024 / 1024
-            intermediate.append(size_in)
-            size = self.blocks_params[i][2]
-            size_out = size[0] * size[1] * size[2] * size[3] * 4 / 1024 / 1024
-            intermediate.append(size_out)
-            min_heap = math.ceil(params + max(intermediate) + self.expansion)
-            latency_n = calculate_latency(fused_model, torch.rand(input_shape), min_heap)
-            if i == (len(self.blocks_params) - 1):
-                size_out = 0
-            if abs(total_latency + self.blocks_params[i][-1] + 20*size_in - 20*size_out - latency_n) \
-                    / (total_latency + self.blocks_params[i][-1] + 20*size_in) < 0.1:
-                total_latency = latency_n
-                partition.append(i)
-                layers = fused_model
-            else:
-                # Avoid shallow copy
-                import copy
-                strategies.append(partition.copy())
-                partition = [i]
-                total_latency = self.blocks_params[i][-1]
-                layers = self.blocks_params[i][0]
-                input_shape = self.blocks_params[i][1]
-                params = self.blocks_params[i][-2]
-        strategies.append(partition)
-        print(strategies)
-        self.strategy = strategies
-        return strategies
+            params = self.blocks_params[i][3]
+            trans = size[0] * size[1] * size[2] * size[3] * 4 / 1024 / 1024
+            loading = -5.335e-13*params**3 + 1.213e-08*params**2 + 0.0006457**params + 1.56
+            min_func = func[0] + latency[i][i+1] + min(trans, loading)
+            partition_point[i-1] = 1 if trans > loading else 2
+            for j in range(0, i):
+                size = self.blocks_params[i][1]
+                params = self.blocks_params[i][3]
+                trans = size[0] * size[1] * size[2] * size[3] * 4 / 1024 / 1024
+                loading = -5.335e-13 * params ** 3 + 1.213e-08 * params ** 2 + 0.0006457 ** params + 1.56
+                if func[j] + latency[j][i] + min(trans, loading) < min_func:
+                    min_func = func[j] + latency[j][i] + min(trans, loading)
+
+
+
 
     def generate_model(self, build_dir='model/'):
         idx = 0
@@ -268,7 +270,7 @@ class ModelSet:
 
             _onnx2tvm(torch.rand(input_size), build_dir='./')
             print('Block latency: ', _calculate_latency(str(input_size[0]) + '/' + str(input_size[1]) + '/' +
-                                                        str(input_size[2]) + '/'+str(input_size[3])))
+                                                        str(input_size[2]) + '/' + str(input_size[3])))
             print('Writing model into ' + path)
             idx += 1
 
@@ -318,9 +320,5 @@ if __name__ == '__main__':
     #     ms.strategy = s
     #     print(ms.strategy)
     #     ms.generate_model('model/mobilenetv1')
-        # _torch2onnx(ms.block_params[0][0], torch.rand(1, 3, 224, 224))
-        # _onnx2tvm(torch.rand(1, 3, 224, 224), build_dir='model/part0/')
-
-
-
-
+    # _torch2onnx(ms.block_params[0][0], torch.rand(1, 3, 224, 224))
+    # _onnx2tvm(torch.rand(1, 3, 224, 224), build_dir='model/part0/')
