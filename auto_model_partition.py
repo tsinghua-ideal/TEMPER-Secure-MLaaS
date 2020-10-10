@@ -236,13 +236,15 @@ class ModelSet:
         partition_flag = [[0 for i in range(layers_n)] for i in range(layers_n)]
         func = [-1 for i in range(layers_n)]
         func[0] = latency[0][1]
+        type = 0
         for i in range(1, layers_n):
             size = self.blocks_params[i][1]
             params = self.blocks_params[i][3]
             trans = size[0] * size[1] * size[2] * size[3] * 4 / 1024 / 1024
             loading = -5.335e-13*params**3 + 1.213e-08*params**2 + 0.0006457**params + 1.56
             min_func = func[0] + latency[i][i+1] + min(trans, loading)
-            partition_point[i-1] = 1 if trans > loading else 2
+            type = 1 if trans > loading else 2
+            partition_point = i 
             for j in range(0, i):
                 size = self.blocks_params[i][1]
                 params = self.blocks_params[i][3]
@@ -250,10 +252,11 @@ class ModelSet:
                 loading = -5.335e-13 * params ** 3 + 1.213e-08 * params ** 2 + 0.0006457 ** params + 1.56
                 if func[j] + latency[j][i] + min(trans, loading) < min_func:
                     min_func = func[j] + latency[j][i] + min(trans, loading)
-
-
-
-
+                    type = 1 if trans > loading else 2
+                    partition_point = j
+            partition_flag[i][partition_point] = type
+        print(partition_flag)
+            
     def generate_model(self, build_dir='model/'):
         idx = 0
         for stg in self.strategy:
