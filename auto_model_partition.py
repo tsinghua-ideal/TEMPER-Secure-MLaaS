@@ -128,6 +128,10 @@ def calculate_latency(torch_model, input_tensor, heap_size=0x40, onnx_model='tem
     return _calculate_latency(input_size=shape, heap_size=heap_size)
 
 
+def size2memory(size):
+    return size[0] * size[1] * size[2] * size[3] * 4 / 1024 / 1024
+
+
 class ModelSet:
     def __init__(self, model=None, input_size=None, unit=None, blocks_params=None, expansion=6, balance_point=42):
         """
@@ -220,43 +224,55 @@ class ModelSet:
         policy:  record the policy of n
         :return:
         """
+        # self.blocks_params[0][1] = [0, 0, 0, 0]
         layers_n = len(self.blocks_params)
-        latency = [[-1 for i in range(layers_n)] for i in range(layers_n)]
+        latency = [[0 for i in range(layers_n)] for i in range(layers_n)]
+        params_table = [[0 for i in range(layers_n)] for i in range(layers_n)]
+        IAs_table = [[0 for i in range(layers_n)] for i in range(layers_n)]
         for i in range(0, layers_n):
+            latency[i][i] = self.blocks_params[i][4]
+            params_table[i][i] = self.blocks_params[i][3]
+            IAs_table[i][i] = size2memory(self.blocks_params[i][1])
             for j in range(i+1, layers_n):
                 total_params = 0
-                for idx in range(i, j):
+                IAs = 0
+                for idx in range(i, j+1):
                     total_params += self.blocks_params[idx][3]
-                if total_params > 42:
-                    for idx in range(i, j):
+                    IAs = max(IAs, size2memory(self.blocks_params[idx][1]))
+                params_table[i][j] = total_params
+                IAs_table[i][j] = IAs
+                if total_params + IAs > self.balance_point:
+                    for idx in range(i, j+1):
                         latency[i][j] += self.blocks_params[idx][5]
                 else:
-                    for idx in range(i, j):
+                    for idx in range(i, j+1):
                         latency[i][j] += self.blocks_params[idx][4]
         partition_flag = [[0 for i in range(layers_n)] for i in range(layers_n)]
-        func = [-1 for i in range(layers_n)]
-        func[0] = latency[0][1]
-        type = 0
+        func = [0 for i in range(layers_n+1)]
+        func[1] = latency[0][0]
         for i in range(1, layers_n):
-            size = self.blocks_params[i][1]
-            params = self.blocks_params[i][3]
-            trans = size[0] * size[1] * size[2] * size[3] * 4 / 1024 / 1024
-            loading = -5.335e-13*params**3 + 1.213e-08*params**2 + 0.0006457**params + 1.56
-            min_func = func[0] + latency[i][i+1] + min(trans, loading)
-            type = 1 if trans > loading else 2
-            partition_point = i 
-            for j in range(0, i):
-                size = self.blocks_params[i][1]
-                params = self.blocks_params[i][3]
-                trans = size[0] * size[1] * size[2] * size[3] * 4 / 1024 / 1024
-                loading = -5.335e-13 * params ** 3 + 1.213e-08 * params ** 2 + 0.0006457 ** params + 1.56
+            point_type = 0
+            min_func = 9999
+            partition_point = -1
+            for j in range(0, i+1):
+                trans = 20 * size2memory(self.blocks_params[j][1]) if j > 0 else 0
+                params = params_table[j][i]
+                loading = -5.335e-13 * params ** 3 + 1.213e-08 * params ** 2 + 0.0006457 ** params + 1.56 if j > 0 else 0
                 if func[j] + latency[j][i] + min(trans, loading) < min_func:
                     min_func = func[j] + latency[j][i] + min(trans, loading)
-                    type = 1 if trans > loading else 2
+                    point_type = 1 if trans > loading else 2
                     partition_point = j
-            partition_flag[i][partition_point] = type
-        print(partition_flag)
-            
+            func[i+1] = min_func
+            print('partition point: ', partition_point)
+            partition_flag[i][partition_point] = point_type
+        partition_flag = np.array(partition_flag)
+        latency = np.array(latency)
+        l = 0
+        for i in range(0, layers_n):
+            l += self.blocks_params[i][5]
+            print(l)
+        print(func[-1])
+
     def generate_model(self, build_dir='model/'):
         idx = 0
         for stg in self.strategy:
@@ -300,21 +316,27 @@ if __name__ == '__main__':
     # import torchvision.models as models
 
     # do a new partition
-    # model = mobilenet(1000)
+    model = mobilenet(1000)
     # model = ResNet18(1000)
     # model = ResNet1(BasicBlock, 10)
     # model = nn.Sequential(mobilenet1(), mobilenet2(), mobilenet3())
     # import torchvision.models as models
     # model = models.resnet50(pretrained=False)
-    model = ResNet(Bottleneck, [3, 4, 6, 3])
+    model = ResNet(Bottleneck, [3, 4, 23, 3])
+    # input_size = (1, 3, 224, 224)
+    # _torch2onnx(model, torch.rand(input_size))
+    # _onnx2tvm(torch.rand(input_size), build_dir='./')
+    # print('Block latency: ', _calculate_latency(str(input_size[0]) + '/' + str(input_size[1]) + '/' +
+    #                                             str(input_size[2]) + '/' + str(input_size[3]), 0x30))
     ms = ModelSet(model, (1, 3, 224, 224))
     ms.run()
     with open('modelset.o', 'wb') as f:
         pickle.dump(ms, f)
 
     # look up for an old partition
-    # with open('mobilenetv1-1.o', 'rb') as f:
+    # with open('modelset.o', 'rb') as f:
     #     ms = pickle.load(f)
+    #     ms.partition()
     #     # ms.expansion = 12
     #     s = []
     #     for i in ms.strategy:
