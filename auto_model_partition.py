@@ -141,7 +141,7 @@ class ModelSet:
         :param blocks_params: A list of set of (model, input shape, output shape, parameter size, latency_origin, latency_step). Default: null
         """
         if unit is None:
-            unit = [conv_block, separable_conv_block, BasicBlock, Bottleneck]
+            unit = [conv_block, separable_conv_block, BasicBlock, Bottleneck, vgg_classifier]
         if blocks_params is None:
             blocks_params = []
         self.unit = unit
@@ -158,7 +158,8 @@ class ModelSet:
         :param model: The model (An instance of torch.nn.Module)
         :param input_size: The input size of model input
         :param unit: The grain of partition. Default: conv_block, separable_conv_block, BasicBlock
-        :param blocks_params: A list of set of (model, input shape, output shape, parameter size, latency_origin, latency_step). Default: null
+        :param blocks_params: A list of set of (model, input shape, output shape, parameter size, latency_origin,
+            latency_step, latency_before, latency_after). Default: null
         :return: True if no exception
         """
         self.model = model
@@ -300,7 +301,11 @@ class ModelSet:
         """
         if not self.blocks_params:
             self._stat_layer_params()
+            import time
+            start = time.time()
             self._get_block_latency()
+            end = time.time()
+            print(str((end - start) * 1000) + 'ms')
             print('partition')
             self.partition()
 
@@ -316,13 +321,15 @@ if __name__ == '__main__':
     # import torchvision.models as models
 
     # do a new partition
-    model = mobilenet(1000)
+    # model = mobilenet(1000)
     # model = ResNet18(1000)
     # model = ResNet1(BasicBlock, 10)
     # model = nn.Sequential(mobilenet1(), mobilenet2(), mobilenet3())
+    import self_defined_nn
+    model = self_defined_nn.get_vgg('E', False)
     # import torchvision.models as models
     # model = models.resnet50(pretrained=False)
-    model = ResNet(Bottleneck, [3, 4, 23, 3])
+    # model = ResNet(Bottleneck, [3, 8, 36, 3])
     # input_size = (1, 3, 224, 224)
     # _torch2onnx(model, torch.rand(input_size))
     # _onnx2tvm(torch.rand(input_size), build_dir='./')
@@ -330,7 +337,7 @@ if __name__ == '__main__':
     #                                             str(input_size[2]) + '/' + str(input_size[3]), 0x30))
     ms = ModelSet(model, (1, 3, 224, 224))
     ms.run()
-    with open('modelset.o', 'wb') as f:
+    with open('modelset-dp.o', 'wb') as f:
         pickle.dump(ms, f)
 
     # look up for an old partition
