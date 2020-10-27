@@ -138,8 +138,8 @@ class ModelSet:
         :param model: The model (An instance of torch.nn.Module)
         :param input_size: The input size of model input
         :param unit: The grain of partition. Default: conv_block, separable_conv_block, BasicBlock
-        :param blocks_params: A list of set of (model, input shape, output shape, parameter size, latency_origin, latency_step). Default: null
-        """
+        :param blocks_params: A list of set of (model, input shape, output shape, parameter size, latency_origin,
+            latency_step, latency_before, latency_after). Default: null        """
         if unit is None:
             unit = [conv_block, separable_conv_block, BasicBlock, Bottleneck, vgg_classifier]
         if blocks_params is None:
@@ -341,8 +341,13 @@ if __name__ == '__main__':
         pickle.dump(ms, f)
 
     # look up for an old partition
-    # with open('modelset.o', 'rb') as f:
+    # with open('/home/lifabing/sgx/best-partion/modelset/mobilenetv1-dp.o', 'rb') as f:
     #     ms = pickle.load(f)
+        # big = 0
+        # for ipt in ms.blocks_params:
+        #     if big < size2memory(ipt[1]):
+        #         big = size2memory(ipt[1])
+        # print(big)
     #     ms.partition()
     #     # ms.expansion = 12
     #     s = []
