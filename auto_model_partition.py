@@ -96,13 +96,13 @@ def _calculate_latency(input_size, heap_size=0x40):
     # note that dynamic path is preferred. Revise sgx-infer.sh to do this.
     ret = subprocess.run('source /home/lifabing/sgx/best-partion/inference/src/sgx-infer.sh ' + input_size + ' ' +
                          str(heap_size), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8",
-                         executable="/bin/bash", timeout=1000)
+                         executable="/bin/bash", timeout=500)
     while ret.stdout.startswith('Attaching debugger'):
         heap_size += 4
         ret = subprocess.run('source /home/lifabing/sgx/best-partion/inference/src/sgx-infer.sh ' + input_size + ' ' +
                              str(heap_size), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                              encoding="utf-8",
-                             executable="/bin/bash", timeout=1000)
+                             executable="/bin/bash", timeout=500)
     arr = ret.stdout.split('\n')[0:-1]
     arr = np.array(arr, dtype='int')
     return arr.mean() / 1000
@@ -133,7 +133,7 @@ def size2memory(size):
 
 
 class ModelSet:
-    def __init__(self, model=None, input_size=None, unit=None, blocks_params=None, expansion=6, balance_point=42):
+    def __init__(self, model=None, input_size=None, unit=None, blocks_params=None, expansion=6, balance_point=45):
         """
         :param model: The model (An instance of torch.nn.Module)
         :param input_size: The input size of model input
@@ -198,19 +198,26 @@ class ModelSet:
         :return:
         """
         for i in range(len(self.blocks_params)):
-            layer, shape, _, _ = self.blocks_params[i]
+            layer, shape, _, params = self.blocks_params[i]
             # _torch2tvm(layer, torch.randn(shape))
             _torch2onnx(layer, torch.randn(shape))
             _onnx2tvm(torch.randn(shape))
 
-            blocks_latency = (
-                _calculate_latency(str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3]),
-                                   heap_size=self.balance_point),)
-            self.blocks_params[i] = self.blocks_params[i] + blocks_latency
-            blocks_latency = (
-                _calculate_latency(str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3]),
-                                   heap_size=160),)
-            self.blocks_params[i] = self.blocks_params[i] + blocks_latency
+            if params + size2memory(shape) + 7 > self.balance_point:
+                blocks_latency = (
+                    _calculate_latency(str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3]),
+                                       heap_size=160),)
+                self.blocks_params[i] = self.blocks_params[i] + blocks_latency
+                self.blocks_params[i] = self.blocks_params[i] + blocks_latency
+            else:
+                blocks_latency = (
+                    _calculate_latency(str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3]),
+                                       heap_size=self.balance_point),)
+                self.blocks_params[i] = self.blocks_params[i] + blocks_latency
+                blocks_latency = (
+                    _calculate_latency(str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3]),
+                                       heap_size=160),)
+                self.blocks_params[i] = self.blocks_params[i] + blocks_latency
 
     def get_block_params(self):
         return self.blocks_params
@@ -242,7 +249,7 @@ class ModelSet:
                     IAs = max(IAs, size2memory(self.blocks_params[idx][1]))
                 params_table[i][j] = total_params
                 IAs_table[i][j] = IAs
-                if total_params + IAs > self.balance_point:
+                if total_params + IAs + 7 > self.balance_point:
                     for idx in range(i, j+1):
                         latency[i][j] += self.blocks_params[idx][5]
                 else:
@@ -321,15 +328,15 @@ if __name__ == '__main__':
     # import torchvision.models as models
 
     # do a new partition
-    # model = mobilenet(1000)
+    model = mobilenet(1000)
     # model = ResNet18(1000)
     # model = ResNet1(BasicBlock, 10)
     # model = nn.Sequential(mobilenet1(), mobilenet2(), mobilenet3())
-    import self_defined_nn
-    model = self_defined_nn.get_vgg('E', False)
+    # import self_defined_nn
+    # model = self_defined_nn.get_vgg('E', False)
     # import torchvision.models as models
     # model = models.resnet50(pretrained=False)
-    # model = ResNet(Bottleneck, [3, 8, 36, 3])
+    # model = ResNet(Bottleneck, [3, 4, 6, 3])
     # input_size = (1, 3, 224, 224)
     # _torch2onnx(model, torch.rand(input_size))
     # _onnx2tvm(torch.rand(input_size), build_dir='./')
@@ -341,13 +348,13 @@ if __name__ == '__main__':
         pickle.dump(ms, f)
 
     # look up for an old partition
-    # with open('/home/lifabing/sgx/best-partion/modelset/mobilenetv1-dp.o', 'rb') as f:
+    # with open('/home/lifabing/sgx/best-partion/modelset/resnet152-dp-mul.o', 'rb') as f:
     #     ms = pickle.load(f)
-        # big = 0
-        # for ipt in ms.blocks_params:
-        #     if big < size2memory(ipt[1]):
-        #         big = size2memory(ipt[1])
-        # print(big)
+    #     # big = 0
+    #     # for ipt in ms.blocks_params:
+    #     #     if big < size2memory(ipt[1]):
+    #     #         big = size2memory(ipt[1])
+    #     # print(big)
     #     ms.partition()
     #     # ms.expansion = 12
     #     s = []

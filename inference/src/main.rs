@@ -27,6 +27,7 @@
      convert::TryFrom as _,
      io::{Read as _, Write as _},
      time::{SystemTime, UNIX_EPOCH},
+     env,
  };
 //  use image::{FilterType, GenericImageView};
  use ndarray::{Array, Array4};
@@ -40,6 +41,8 @@
     ms
 }
  fn main() {
+     env::set_var("TVM_NUM_THREADS", "6");
+
     let path = env!("PATH").split(":");
     let vec: Vec<&str> = path.collect();
     let a = vec[2].split("/");
