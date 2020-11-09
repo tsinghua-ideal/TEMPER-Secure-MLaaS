@@ -273,6 +273,7 @@ class ModelSet:
             func[i+1] = min_func
             print('partition point: ', partition_point)
             partition_flag[i][partition_point] = point_type
+        self.strategy = partition_flag
         partition_flag = np.array(partition_flag)
         latency = np.array(latency)
         l = 0
@@ -281,25 +282,44 @@ class ModelSet:
             print(l)
         print(func[-1])
 
-    def generate_model(self, build_dir='model/'):
-        idx = 0
-        for stg in self.strategy:
-            model = self.blocks_params[stg[0]][0]
-            input_size = self.blocks_params[stg[0]][1]
-            if len(stg) > 1:
-                for index in range(1, len(stg)):
-                    model = nn.Sequential(model, self.blocks_params[stg[index]][0])
+    def generate_block_model(self, build_dir='model/'):
+        for idx, bp in enumerate(self.blocks_params):
+            model = bp[0]
+            input_size = bp[1]
             _torch2onnx(model, torch.rand(input_size))
-            path = osp.join(build_dir, 'part' + str(idx))
+            path = osp.join(build_dir, str(idx))
             if not osp.exists(path):
                 os.makedirs(path)
             _onnx2tvm(torch.rand(input_size), build_dir=path)
 
-            _onnx2tvm(torch.rand(input_size), build_dir='./')
-            print('Block latency: ', _calculate_latency(str(input_size[0]) + '/' + str(input_size[1]) + '/' +
-                                                        str(input_size[2]) + '/' + str(input_size[3])))
+    def generate_model(self, build_dir='model/'):
+        index_old = len(self.strategy) - 1
+        modelset = []
+        while index_old > 0:
+            result = [i for i, j in enumerate(self.strategy[index_old]) if j == 1 or j == 2]
+            if not result:
+                return
+            index_new = result[0] - 1
+            model = self.blocks_params[index_new+1][0]
+            input_size = self.blocks_params[index_new+1][1]
+            for i in range(index_new+2, index_old+1):
+                model = nn.Sequential(model, self.blocks_params[i][0])
+            modelset.append((model, input_size))
+            index_old = index_new
+            # print(index_new)
+        idx = 0
+        for (model, input_size) in reversed(modelset):
+            path = osp.join(build_dir, 'part' + str(idx))
+            if not osp.exists(path):
+                os.makedirs(path)
+            _torch2onnx(model, torch.rand(input_size))
+            _onnx2tvm(torch.rand(input_size), build_dir=path)
             print('Writing model into ' + path)
             idx += 1
+
+            # _onnx2tvm(torch.rand(input_size), build_dir='./')
+            # print('Block latency: ', _calculate_latency(str(input_size[0]) + '/' + str(input_size[1]) + '/' +
+            #                                             str(input_size[2]) + '/' + str(input_size[3])))
 
     def run(self):
         """
@@ -328,34 +348,36 @@ if __name__ == '__main__':
     # import torchvision.models as models
 
     # do a new partition
-    model = mobilenet(1000)
-    # model = ResNet18(1000)
-    # model = ResNet1(BasicBlock, 10)
-    # model = nn.Sequential(mobilenet1(), mobilenet2(), mobilenet3())
-    # import self_defined_nn
-    # model = self_defined_nn.get_vgg('E', False)
-    # import torchvision.models as models
-    # model = models.resnet50(pretrained=False)
-    # model = ResNet(Bottleneck, [3, 4, 6, 3])
-    # input_size = (1, 3, 224, 224)
-    # _torch2onnx(model, torch.rand(input_size))
-    # _onnx2tvm(torch.rand(input_size), build_dir='./')
-    # print('Block latency: ', _calculate_latency(str(input_size[0]) + '/' + str(input_size[1]) + '/' +
-    #                                             str(input_size[2]) + '/' + str(input_size[3]), 0x30))
-    ms = ModelSet(model, (1, 3, 224, 224))
-    ms.run()
-    with open('modelset-dp.o', 'wb') as f:
-        pickle.dump(ms, f)
+    # model = mobilenet(1000)
+    # # model = ResNet18(1000)
+    # # model = ResNet1(BasicBlock, 10)
+    # # model = nn.Sequential(mobilenet1(), mobilenet2(), mobilenet3())
+    # # import self_defined_nn
+    # # model = self_defined_nn.get_vgg('E', False)
+    # # import torchvision.models as models
+    # # model = models.resnet50(pretrained=False)
+    # # model = ResNet(Bottleneck, [3, 4, 6, 3])
+    # # input_size = (1, 3, 224, 224)
+    # # _torch2onnx(model, torch.rand(input_size))
+    # # _onnx2tvm(torch.rand(input_size), build_dir='./')
+    # # print('Block latency: ', _calculate_latency(str(input_size[0]) + '/' + str(input_size[1]) + '/' +
+    # #                                             str(input_size[2]) + '/' + str(input_size[3]), 0x30))
+    # ms = ModelSet(model, (1, 3, 224, 224))
+    # ms.run()
+    # with open('modelset-dp.o', 'wb') as f:
+    #     pickle.dump(ms, f)
 
     # look up for an old partition
-    # with open('/home/lifabing/sgx/best-partion/modelset/resnet152-dp-mul.o', 'rb') as f:
-    #     ms = pickle.load(f)
+    with open('/home/lifabing/sgx/best-partion/modelset/resnet50-dp.o', 'rb') as f:
+        ms = pickle.load(f)
+        ms.partition()
+        ms.generate_model()
+        # ms.generate_block_model('/home/lifabing/sgx/re-implementation/vessels/model/resenet18')
     #     # big = 0
     #     # for ipt in ms.blocks_params:
     #     #     if big < size2memory(ipt[1]):
     #     #         big = size2memory(ipt[1])
     #     # print(big)
-    #     ms.partition()
     #     # ms.expansion = 12
     #     s = []
     #     for i in ms.strategy:
