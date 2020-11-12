@@ -16,8 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 use std::process::Command;
+use std::io::prelude::*;
 
 macro_rules! mf_dir {
     ($p:literal) => {
@@ -30,16 +30,6 @@ fn main() {
 
     let build_output = Command::new(mf_dir!("/src/build_model.py"))
         .arg(&out_dir)
-        .env(
-            "PYTHONPATH",
-            concat!(
-                mf_dir!("/../../python"),
-                ":",
-                mf_dir!("/../../nnvm/python"),
-                ":",
-                mf_dir!("/../../topi/python")
-            ),
-        )
         .output()
         .expect("Failed to build model");
     assert!(
@@ -82,4 +72,3 @@ fn main() {
     println!("cargo:rustc-link-lib=static=model");
     println!("cargo:rustc-link-search=native={}", out_dir);
 }
-

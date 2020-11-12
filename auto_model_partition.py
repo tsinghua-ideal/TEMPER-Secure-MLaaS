@@ -11,6 +11,7 @@ from self_defined_nn import *
 import os
 from os import path as osp
 import subprocess
+import pickle
 
 
 def isRightChild(index):
@@ -366,26 +367,28 @@ if __name__ == '__main__':
     # import torchvision.models as models
 
     # model = mobilenet(1000)
-    model = ResNet18(1000)
-    # # model = ResNet1(BasicBlock, 10)
-    # # model = nn.Sequential(mobilenet1(), mobilenet2(), mobilenet3())
-    # ms = ModelSet(model, (1, 3, 224, 224))
-    # ms.run(70)
-    import pickle
-
-    with open('partition.o', 'rb') as f:
-        pt = pickle.load(f)
-        pt.get_strategy()
+    # model = ResNet18(1000)
+    # # # model = ResNet1(BasicBlock, 10)
+    # # # model = nn.Sequential(mobilenet1(), mobilenet2(), mobilenet3())
+    # # ms = ModelSet(model, (1, 3, 224, 224))
+    # # ms.run(70)
+    #
+    # with open('partition.o', 'rb') as f:
+    #     pt = pickle.load(f)
+    #     pt.get_strategy()
         # _torch2onnx(pt.block_params[0][0], torch.rand(1, 3, 224, 224))
         # _onnx2tvm(torch.rand(1, 3, 224, 224), build_dir='model/part0/')
     # with open('modelset.o', 'wb') as f:
     #     pickle.dump(ms, f)
-    with open('modelset.o', 'rb') as f:
-        ms = pickle.load(f)
-    pt = Partition(ms.blocks_params)
-    del ms
-    pt.binary_partition()
-    pt.get_strategy()
-    with open('partition.o', 'wb') as f:
-        pickle.dump(pt, f)
+    with open('bak/loading-partition-mobilenet.o', 'rb') as f:
+        pt = pickle.load(f)
+        latency = calculate_latency(pt.block_params[0][0], torch.randn(1, 3, 224, 224))
+        pass
+        # ms
+    # pt = Partition(ms.blocks_params)
+    # del ms
+    # pt.binary_partition()
+    # pt.get_strategy()
+    # with open('partition.o', 'wb') as f:
+    #     pickle.dump(pt, f)
 

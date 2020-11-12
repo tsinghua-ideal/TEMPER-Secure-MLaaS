@@ -18,7 +18,6 @@
  */
 
  extern crate tvm_runtime;
- extern crate image;
  extern crate ndarray;
  extern crate rand;
 
@@ -55,7 +54,7 @@
     let graph = tvm_runtime::Graph::try_from(graph_json).unwrap();
     let mut exec = tvm_runtime::GraphExecutor::new(graph, &syslib).unwrap();
     exec.load_params(params);
-    // println!("{:?}", SystemTime::now().duration_since(sy_time).unwrap().as_micros());
+    println!("{:?}", SystemTime::now().duration_since(sy_time).unwrap().as_micros());
 
     // println!("{:#?}", &x);
     

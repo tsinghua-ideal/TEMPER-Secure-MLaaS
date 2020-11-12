@@ -22,9 +22,8 @@ authors = ["Nick Hynes <nhynes@nhynes.com>"]
 edition = "2018"
 
 [dependencies]
-tvm-runtime = { path = "/home/lifabing/tvm/rust/runtime" }
+tvm-runtime = { path = "/home/lifabing/sgx/incubator-tvm/rust/runtime" }
 ndarray = "0.12"
-image = "0.20"
 rand = "0.3.17"
 # mbedtls = {path="/home/lifabing/Downloads/rust-mbedtls", default-features = false, features = ["sgx"]}
 
