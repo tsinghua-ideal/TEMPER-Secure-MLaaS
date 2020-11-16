@@ -48,7 +48,7 @@
     let a = vec[2].split("/");
     let vec: Vec<&str> = a.collect();
     let shape = (vec[0].to_string().parse::<usize>().unwrap(), vec[1].to_string().parse::<usize>().unwrap(), vec[2].to_string().parse::<usize>().unwrap(), vec[3].to_string().parse::<usize>().unwrap());
-
+    // let sy_time = SystemTime::now();
     let syslib = tvm_runtime::SystemLibModule::default();
     let graph_json = include_str!(concat!(env!("OUT_DIR"), "/graph.json"));
     let params_bytes = include_bytes!(concat!(env!("OUT_DIR"), "/params.bin"));
@@ -57,7 +57,7 @@
     let graph = tvm_runtime::Graph::try_from(graph_json).unwrap();
     let mut exec = tvm_runtime::GraphExecutor::new(graph, &syslib).unwrap();
     exec.load_params(params);
-
+    // println!("loading: {:?}", SystemTime::now().duration_since(sy_time).unwrap().as_micros());
     let mut rng =rand::thread_rng();
     let mut ran = vec![];
     for _i in 0..shape.0*shape.1*shape.2*shape.3{

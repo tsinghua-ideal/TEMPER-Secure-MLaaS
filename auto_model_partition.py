@@ -348,7 +348,7 @@ if __name__ == '__main__':
     # import torchvision.models as models
 
     # do a new partition
-    # model = mobilenet(1000)
+    model = mobilenet(1000)
     # # model = ResNet18(1000)
     # # model = ResNet1(BasicBlock, 10)
     # # model = nn.Sequential(mobilenet1(), mobilenet2(), mobilenet3())
@@ -357,20 +357,20 @@ if __name__ == '__main__':
     # # import torchvision.models as models
     # # # model = models.resnet50(pretrained=False)
     # # # model = ResNet(Bottleneck, [3, 4, 6, 3])
-    # # # input_size = (1, 3, 224, 224)
-    # # # _torch2onnx(model, torch.rand(input_size))
-    # # # _onnx2tvm(torch.rand(input_size), build_dir='./')
-    # # # print('Block latency: ', _calculate_latency(str(input_size[0]) + '/' + str(input_size[1]) + '/' +
-    # # #                                             str(input_size[2]) + '/' + str(input_size[3]), 0x30))
+    input_size = (1, 3, 224, 224)
+    _torch2onnx(model, torch.rand(input_size))
+    _onnx2tvm(torch.rand(input_size), build_dir='./')
+    print('Block latency: ', _calculate_latency(str(input_size[0]) + '/' + str(input_size[1]) + '/' +
+                                                str(input_size[2]) + '/' + str(input_size[3]), 0x30))
     # ms = ModelSet(model, (1, 3, 224, 224))
     # ms.run()
     # with open('modelset-dp-mul.o', 'wb') as f:
     #     pickle.dump(ms, f)
 
     # look up for an old partition
-    with open('/home/lifabing/sgx/best-partion/modelset/vgg-D-dp.o', 'rb') as f:
-        ms = pickle.load(f)
-        ms.partition()
+    # with open('/home/lifabing/sgx/best-partion/modelset/vgg-D-dp.o', 'rb') as f:
+    #     ms = pickle.load(f)
+    #     ms.partition()
         # ms.generate_model()
         # ms.generate_block_model('/home/lifabing/sgx/re-implementation/vessels/model/resenet18')
     #     # big = 0
