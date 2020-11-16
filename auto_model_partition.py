@@ -263,9 +263,9 @@ class ModelSet:
             min_func = 9999
             partition_point = -1
             for j in range(0, i+1):
-                trans = 20 * size2memory(self.blocks_params[j][1]) if j > 0 else 0
+                trans = 5 * size2memory(self.blocks_params[j][1]) if j > 0 else 0
                 params = params_table[j][i]
-                loading = -5.335e-13 * params ** 3 + 1.213e-08 * params ** 2 + 0.0006457 ** params + 1.56 if j > 0 else 0
+                loading = -0.0004522 * params ** 3 + 0.1028 * params ** 2 + 0.2135 ** params + 3.148 if j > 0 else 0
                 if func[j] + latency[j][i] + min(trans, loading) < min_func:
                     min_func = func[j] + latency[j][i] + min(trans, loading)
                     point_type = 1 if trans > loading else 2
