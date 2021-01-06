@@ -73,7 +73,7 @@
 
     // let output = output.to_vec::<f32>();
     // find the maximum entry in the output and its index
-    let duration = SystemTime::now().duration_since(sy_time).unwrap().as_micros();
+    // let duration = SystemTime::now().duration_since(sy_time).unwrap().as_micros();
     // let mut argmax = -1;
     // let mut max_prob = 0.;
     // // println!("{:?}", output.len());
@@ -84,7 +84,8 @@
     //     }
     // }
     // println!("It took {:?} us", duration);
-    println!("{:?}", duration);
+     println!("{:?}", SystemTime::now().duration_since(sy_time).unwrap().as_micros());
+    // println!("{:?}", duration);
     // let ts1 = timestamp();
     // println!("TimeStamp: {}", ts1);
     // println!("The index: {:?}", argmax);

@@ -58,7 +58,7 @@ def _onnx2tvm(input_tensor, onnx_model='temp.onnx', build_dir='./'):
     input_name = 'input'
     shape_dict = {input_name: input_tensor.shape}
     mod, params = relay.frontend.from_onnx(onnx_model, shape_dict)
-    with relay.build_config(opt_level=4):
+    with relay.build_config(opt_level=3):
         graph, lib, params = relay.build_module.build(
             mod, target=target, params=params)
 
@@ -263,15 +263,18 @@ class ModelSet:
             min_func = 9999
             partition_point = -1
             for j in range(0, i+1):
-                trans = 5 * size2memory(self.blocks_params[j][1]) if j > 0 else 0
+                trans = 15 * size2memory(self.blocks_params[j][1]) if j > 0 else 0
                 params = params_table[j][i]
-                loading = -0.0004522 * params ** 3 + 0.1028 * params ** 2 + 0.2135 ** params + 3.148 if j > 0 else 0
+                # loading = -0.0004522 * params ** 3 + 0.1028 * params ** 2 + 0.2135 ** params + 3.148 if j > 0 else 0
+                loading = 999
+                # trans = 999
                 if func[j] + latency[j][i] + min(trans, loading) < min_func:
                     min_func = func[j] + latency[j][i] + min(trans, loading)
                     point_type = 1 if trans > loading else 2
                     partition_point = j
+                    print(trans)
             func[i+1] = min_func
-            print('partition point: ', partition_point)
+            print('n={} partition point:{} partition type:{}'.format(i, partition_point, point_type))
             partition_flag[i][partition_point] = point_type
         self.strategy = partition_flag
         partition_flag = np.array(partition_flag)
@@ -279,7 +282,7 @@ class ModelSet:
         l = 0
         for i in range(0, layers_n):
             l += self.blocks_params[i][4]
-            print(l)
+        print(l)
         print(func[-1])
 
     def generate_block_model(self, build_dir='model/'):
@@ -308,15 +311,17 @@ class ModelSet:
             index_old = index_new
             # print(index_new)
         idx = 0
+        trans = 0
         for (model, input_size) in reversed(modelset):
-            path = osp.join(build_dir, 'part' + str(idx))
+            path = osp.join(build_dir, str(idx))
             if not osp.exists(path):
                 os.makedirs(path)
+            trans += 15 * size2memory(input_size)
             _torch2onnx(model, torch.rand(input_size))
             _onnx2tvm(torch.rand(input_size), build_dir=path)
             print('Writing model into ' + path)
             idx += 1
-
+        print('transmission latency', trans)
             # _onnx2tvm(torch.rand(input_size), build_dir='./')
             # print('Block latency: ', _calculate_latency(str(input_size[0]) + '/' + str(input_size[1]) + '/' +
             #                                             str(input_size[2]) + '/' + str(input_size[3])))
@@ -348,36 +353,51 @@ if __name__ == '__main__':
     # import torchvision.models as models
 
     # do a new partition
-    model = mobilenet(1000)
-    # # model = ResNet18(1000)
-    # # model = ResNet1(BasicBlock, 10)
-    # # model = nn.Sequential(mobilenet1(), mobilenet2(), mobilenet3())
+    # model = mobilenet(1000)
+    # # # model = ResNet18(1000)
+    # # # model = ResNet1(BasicBlock, 10)
+    # # # model = nn.Sequential(mobilenet1(), mobilenet2(), mobilenet3())
     # import self_defined_nn
     # model = self_defined_nn.get_vgg('D', False)
-    # # import torchvision.models as models
-    # # # model = models.resnet50(pretrained=False)
-    # # # model = ResNet(Bottleneck, [3, 4, 6, 3])
-    input_size = (1, 3, 224, 224)
-    _torch2onnx(model, torch.rand(input_size))
-    _onnx2tvm(torch.rand(input_size), build_dir='./')
-    print('Block latency: ', _calculate_latency(str(input_size[0]) + '/' + str(input_size[1]) + '/' +
-                                                str(input_size[2]) + '/' + str(input_size[3]), 0x30))
-    # ms = ModelSet(model, (1, 3, 224, 224))
-    # ms.run()
-    # with open('modelset-dp-mul.o', 'wb') as f:
-    #     pickle.dump(ms, f)
+    # total_ops, total_params = profile(model, (torch.randn((1, 3, 224, 224)),), verbose=False)
+    # print("%s | %.3f MB | %.3fG GFLOPs" % ('model', float(total_params * 4. / (1024 ** 2.)), total_ops / (1000 ** 3)))
+    # import torchvision.models as models
+    # model = models.resnet50(pretrained=False)
+    # densenet169
+    # model = DenseNet(32, (6, 12, 32, 32), 69)
+    # densenet201
+    # model = DenseNet(32, (6, 12, 48, 32), 64)
+    # inception_v3
+
+    # gnmt
+    from GNMT import *
+    model = GNMT(vocab_size=1000)
+
+    # model = ResNet(Bottleneck, [3, 30, 48, 8])
+    # input_size = (1, 3, 224, 224)
+    # _torch2onnx(model, torch.rand(input_size))
+    # _onnx2tvm(torch.rand(input_size), build_dir='./')
+    # print('Block latency: ', _calculate_latency(str(input_size[0]) + '/' + str(input_size[1]) + '/' +
+    #                                             str(input_size[2]) + '/' + str(input_size[3]), 0x80))
+    # ms = ModelSet(model, (1, 3, 224, 224), unit=[DenseBlock, Transition, conv_block, Dense_Classifier])
+    ms = ModelSet(model, (1, 1024, 1024), unit=[nn.LSTM, nn.Embedding, nn.Linear, nn.Dropout])
+    ms.run()
+    with open('gnmt-dp-mul.o', 'wb') as f:
+        pickle.dump(ms, f)
 
     # look up for an old partition
-    # with open('/home/lifabing/sgx/best-partion/modelset/vgg-D-dp.o', 'rb') as f:
+    # with open('/home/lifabing/sgx/best-partion/modelset/mobilenetv1-dp.o', 'rb') as f:
     #     ms = pickle.load(f)
     #     ms.partition()
-        # ms.generate_model()
-        # ms.generate_block_model('/home/lifabing/sgx/re-implementation/vessels/model/resenet18')
-    #     # big = 0
-    #     # for ipt in ms.blocks_params:
-    #     #     if big < size2memory(ipt[1]):
-    #     #         big = size2memory(ipt[1])
-    #     # print(big)
+    #     # ms.generate_model()
+    # #     path = '/home/lifabing/sgx/re-implementation/vessels/model/densenet201'
+    # #     # path = '/home/lifabing/sgx/cluster-inference/model/densenet201'
+    # #     ms.generate_model(path)
+    #     big = 0
+    #     for ipt in ms.blocks_params:
+    #         if big < size2memory(ipt[1]):
+    #             big = size2memory(ipt[1])
+    #     print(big)
     #     # ms.expansion = 12
     #     s = []
     #     for i in ms.strategy:
