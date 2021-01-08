@@ -73,7 +73,7 @@ class RecurrentAttention(nn.Module):
         # set attention mask, sequences have different lengths, this mask
         # allows to include only valid elements of context in attention's
         # softmax
-        self.attn.set_mask(context_len, context)
+        # self.attn.set_mask(context_len, context)
 
         inputs = self.dropout(inputs)
         rnn_outputs, hidden = self.rnn(inputs, hidden)

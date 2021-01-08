@@ -7,6 +7,7 @@ from collections import OrderedDict
 from torch import Tensor
 from torch.jit.annotations import List
 
+
 class conv_block(nn.Module):
     def __init__(self, input_channels, out_channels, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), pool=None,
                  bn_flag=True):
@@ -746,7 +747,7 @@ class vgg_pool(nn.Module):
 class vgg_classifier(nn.Module):
     def __init__(self, num_classes=1000):
         super(vgg_classifier, self).__init__()
-        self.avgpool = nn.AdaptiveMaxPool2d((7, 7))
+        # self.avgpool = nn.MaxPool2d((2, 2))
         self.classifier = nn.Sequential(
             nn.Linear(512 * 7 * 7, 4096),
             nn.ReLU(True),
@@ -758,7 +759,7 @@ class vgg_classifier(nn.Module):
         )
 
     def forward(self, x):
-        x = self.avgpool(x)
+        # x = self.avgpool(x)
         x = torch.flatten(x, 1)
         x = self.classifier(x)
         return x
@@ -769,13 +770,14 @@ class VGG(nn.Module):
     def __init__(self, features, num_classes=1000, init_weights=True):
         super(VGG, self).__init__()
         self.features = features
-        # self.classifier = vgg_classifier(num_classes)
+        self.classifier = vgg_classifier(num_classes)
         if init_weights:
             self._initialize_weights()
 
     def forward(self, x):
         x = self.features(x)
-        # x = self.classifier(x)
+        # print(x.size())
+        x = self.classifier(x)
         return x
 
     def _initialize_weights(self):
@@ -797,16 +799,17 @@ def make_layers(cfg, batch_norm=False):
     in_channels = 3
     for v in cfg:
         if v == 'M':
-            # layers += [nn.MaxPool2d(kernel_size=2, stride=2)]
-            layers += [vgg_pool()]
+            layers += [nn.MaxPool2d(kernel_size=2, stride=2)]
+            # layers += [vgg_pool()]
+            continue
         else:
             # conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=1)
             if batch_norm:
                 # layers += [conv2d, nn.BatchNorm2d(v), nn.ReLU(inplace=True)]
-                layers += [conv_block(in_channels, v, kernel_size=3, stride=2, padding=1)]
+                layers += [conv_block(in_channels, v, kernel_size=3, stride=1, padding=1)]
             else:
                 # layers += [conv2d, nn.ReLU(inplace=True)]
-                layers += [conv_block(in_channels, v, kernel_size=3, stride=2, padding=1, bn_flag=False)]
+                layers += [conv_block(in_channels, v, kernel_size=3, stride=1, padding=1, bn_flag=False)]
             in_channels = v
     return nn.Sequential(*layers)
 
