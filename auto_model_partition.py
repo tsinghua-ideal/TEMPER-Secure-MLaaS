@@ -131,7 +131,9 @@ def calculate_latency(torch_model, input_tensor, heap_size=0x40, onnx_model='tem
 
 
 def size2memory(size):
-    return size[0] * size[1] * size[2] * size[3] * 4 / 1024 / 1024
+    from functools import reduce
+    ln = reduce(lambda x, y: x * y, size)
+    return ln * 4 / 1024 / 1024
 
 
 class ModelSet:
@@ -215,6 +217,10 @@ class ModelSet:
         """
         for i in range(len(self.blocks_params)):
             layer, shape, _, params = self.blocks_params[i]
+            if len(shape) == 2:
+                shape = [1, 1, shape[0], shape[1]]
+            if len(shape) == 1:
+                shape = [1, 1, 1, shape[0]]
             # _torch2tvm(layer, torch.randn(shape))
             _torch2onnx(layer, torch.randn(shape))
             _onnx2tvm(torch.randn(shape))
@@ -271,27 +277,68 @@ class ModelSet:
                 else:
                     for idx in range(i, j+1):
                         latency[i][j] += self.blocks_params[idx][4]
+
+        # upper_bound = latency[-1][-1]
+        # orgin = []
+        # for i in range(layers_n):
+        #     orgin.append(latency[i][i])
+        # print(print("{:.3f}".format(max(orgin))))
+        # print(max(orgin)*layers_n)
+        # peak = max(orgin)
+        # idx = 1
+        # while idx < len(orgin):
+        #     if orgin[idx] + orgin[idx-1] < peak:
+        #         new_val = orgin[idx] + orgin[idx-1]
+        #         orgin.pop(idx)
+        #         orgin.pop(idx-1)
+        #         orgin.insert(idx-1, new_val)
+        #     else:
+        #         idx += 1
+        # orgin = [float('{:.3f}'.format(i)) for i in orgin]
+        # print(len(orgin))
+        # print(orgin)
+        # combine_point = []
+        # for i in range(layers_n):
+        #     peak = max(orgin)
+        #
+        #     if peak * (layers_n - i) < upper_bound:
+        #         break
+        #     else:
+
+                # print('n={} partition point:{} block latency:{}'.format(i, , bl))
+
         partition_flag = [[0 for i in range(layers_n)] for i in range(layers_n)]
         func = [0 for i in range(layers_n+1)]
+        block_latency = [0 for i in range(layers_n + 1)]
+        num_blocks = [0 for i in range(layers_n + 1)]
         func[1] = latency[0][0]
+        num_blocks[1] = 1
+        block_latency[1] = latency[0][0]
         for i in range(1, layers_n):
             point_type = 0
             min_func = 9999
+            bl = 9999
+            nb = 9999
             partition_point = -1
             for j in range(0, i+1):
                 trans = 15 * size2memory(self.blocks_params[j][1]) if j > 0 else 0
-                params = params_table[j][i]
-                loading = -0.0004522 * params ** 3 + 0.1028 * params ** 2 + 0.2135 ** params + 3.148 if j > 0 else 0
-                loading = 999
-                # trans = 999
-                if func[j] + latency[j][i] + min(trans, loading) < min_func:
-                    min_func = func[j] + latency[j][i] + min(trans, loading)
-                    point_type = 1 if trans > loading else 2
+                # old_trans = func[j] - block_latency[j]
+                # 1. new block 2.combination
+                if max(latency[j][i], trans) > block_latency[j] and min_func > (max(latency[j][i], trans)) * (num_blocks[j] + 1):
+                    min_func = max(latency[j][i], trans) * (num_blocks[j] + 1)
+                    bl = max(latency[j][i], trans)
+                    nb = num_blocks[j] + 1
                     partition_point = j
-                    print(trans)
+                if max(latency[j][i], trans) < block_latency[j] and min_func > (block_latency[j]) * (num_blocks[j] + 1):
+                    min_func = (block_latency[j]) * (num_blocks[j] + 1)
+                    bl = block_latency[j]
+                    nb = num_blocks[j] + 1
+                    partition_point = j
             func[i+1] = min_func
-            print('n={} partition point:{} partition type:{}'.format(i, partition_point, point_type))
-            partition_flag[i][partition_point] = point_type
+            num_blocks[i+1] = nb
+            block_latency[i+1] = bl
+            print('n={} partition point:{} block latency:{}'.format(i, partition_point, bl))
+            partition_flag[i][partition_point] = 1
         self.strategy = partition_flag
         partition_flag = np.array(partition_flag)
         latency = np.array(latency)
@@ -334,13 +381,14 @@ class ModelSet:
                 os.makedirs(path)
             trans += 15 * size2memory(input_size)
             _torch2onnx(model, torch.rand(input_size))
-            _onnx2tvm(torch.rand(input_size), build_dir=path)
-            print('Writing model into ' + path)
+            # _onnx2tvm(torch.rand(input_size), build_dir=path)
+            _onnx2tvm(torch.rand(input_size), build_dir='./')
             idx += 1
-        print('transmission latency', trans)
-            # _onnx2tvm(torch.rand(input_size), build_dir='./')
-            # print('Block latency: ', _calculate_latency(str(input_size[0]) + '/' + str(input_size[1]) + '/' +
-            #                                             str(input_size[2]) + '/' + str(input_size[3])))
+            print('Writing model into ' + path)
+            print('transmission latency', 15 * size2memory(input_size))
+            print('Block latency: ', _calculate_latency(str(input_size[0]) + '/' + str(input_size[1]) + '/' +
+                                                        str(input_size[2]) + '/' + str(input_size[3]), heap_size=0x30))
+        print('total transmission latency', trans)
 
     def run(self):
         """
@@ -372,8 +420,7 @@ if __name__ == '__main__':
     # # # model = ResNet18(1000)
     # # # model = ResNet1(BasicBlock, 10)
     # # # model = nn.Sequential(mobilenet1(), mobilenet2(), mobilenet3())
-    # import self_defined_nn
-    model = self_defined_nn.get_vgg('E', False)
+
     # import torchvision.models as models
     # # model = models.vgg16(pretrained=False)
     # _, total_params = profile(model, (torch.rand((1, 3, 224, 224)),), verbose=False)
@@ -413,16 +460,25 @@ if __name__ == '__main__':
     #                                             str(input_size[2]) + '/' + str(input_size[3]), 0x30))
     # # ms = ModelSet(model, (1, 3, 224, 224), unit=[DenseBlock, Transition, conv_block, Dense_Classifier])
     # ms = ModelSet(model, (1, 1024), unit=[nn.LSTM, nn.Embedding, nn.Linear, nn.Dropout])
-    ms = ModelSet(model, (1, 3, 224, 224), unit=[conv_block, vgg_classifier, nn.MaxPool2d])
-    ms.run()
-    with open('vgg19-dp-mul.o', 'wb') as f:
-        pickle.dump(ms, f)
+    # import self_defined_nn
+    # model = self_defined_nn.get_vgg('E', False)
+    # model = Inception3()
+    # # densenet201
+    # # model = DenseNet(32, (6, 12, 48, 32), 64)
+    # _, total_params = profile(model, (torch.rand((1, 3, 224, 224)),), verbose=False)
+    # print("%s | %.3f MB" % ('model', float(total_params * 4. / (1024 ** 2.))))
+    # # ms = ModelSet(model, (1, 3, 224, 224), unit=[DenseLayer, Transition, conv_block, Dense_Classifier])
+    # # ms = ModelSet(model, (1, 3, 224, 224), unit=[conv_block, vgg_classifier, nn.MaxPool2d, vgg_fc1, vgg_fc2])
+    # ms = ModelSet(model, (1, 3, 299, 299), unit=[sBasicConv2d, InceptionA, InceptionB, InceptionC, InceptionD, InceptionE, InceptionAux, inception_classifier, inception_pool])
+    # ms.run()
+    # with open('densenet169-new-dp-mul.o', 'wb') as f:
+    #     pickle.dump(ms, f)
 
     # look up for an old partition
-    # with open('/home/lifabing/sgx/best-partion/vgg16-dp-mul.o', 'rb') as f:
-    #     ms = pickle.load(f)
-    #     ms.partition()
-    #     # ms.generate_model()
+    with open('/home/lifabing/sgx/best-partion/inception3-dp-mul.o.o', 'rb') as f:
+        ms = pickle.load(f)
+        ms.partition()
+        ms.generate_model()
     #     path = '/home/lifabing/sgx/re-implementation/vessels/model/vgg16'
     #     # path = '/home/lifabing/sgx/cluster-inference/model/vgg16'
     #     ms.generate_model(path)
