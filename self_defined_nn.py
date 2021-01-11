@@ -1153,7 +1153,7 @@ class Inception3(nn.Module):
         super(Inception3, self).__init__()
         if inception_blocks is None:
             inception_blocks = [
-                BasicConv2d, InceptionA, InceptionB, InceptionC,
+                sBasicConv2d, InceptionA, InceptionB, InceptionC,
                 InceptionD, InceptionE, InceptionAux
             ]
         assert len(inception_blocks) == 7
@@ -1497,6 +1497,19 @@ class BasicConv2d(nn.Module):
 
     def __init__(self, in_channels, out_channels, **kwargs):
         super(BasicConv2d, self).__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
+        self.bn = nn.BatchNorm2d(out_channels, eps=0.001)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.bn(x)
+        return F.relu(x, inplace=True)
+
+
+class sBasicConv2d(nn.Module):
+
+    def __init__(self, in_channels, out_channels, **kwargs):
+        super(sBasicConv2d, self).__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
         self.bn = nn.BatchNorm2d(out_channels, eps=0.001)
 

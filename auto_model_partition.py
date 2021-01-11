@@ -475,7 +475,7 @@ if __name__ == '__main__':
     #     pickle.dump(ms, f)
 
     # look up for an old partition
-    with open('/home/lifabing/sgx/best-partion/inception3-dp-mul.o.o', 'rb') as f:
+    with open('/home/lifabing/sgx/best-partion/inception3-dp-mul.o', 'rb') as f:
         ms = pickle.load(f)
         ms.partition()
         ms.generate_model()
