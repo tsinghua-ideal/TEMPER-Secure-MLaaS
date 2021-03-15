@@ -88,7 +88,7 @@ def _torch2tvm(torch_model, input_tensor):
     """
 
 
-def _calculate_latency(input_size, heap_size=0x40):
+def _calculate_latency(input_size, heap_size=0x28):
     """
     Get the output of RUST application by Process Module. A external bash can be applied:
     #!/bin/bash
@@ -170,7 +170,7 @@ class ModelSet:
         self.strategy = None
         self.graph_path = graph_path
         self.topo = None
-        self._generate_topo()
+        # self._generate_topo()
 
     def _generate_topo(self):
         with open(self.graph_path, 'r') as f:
@@ -248,37 +248,34 @@ class ModelSet:
         calculate the latency of each block
         :return:
         """
-        # Normal
-        # Abnormal
-        _torch2onnx(self.model, torch.randn(self.input_size))
-        _onnx2tvm(torch.randn(self.input_size))
-        _calculate_latency(str(self.input_size[0]) + '/' + str(self.input_size[1]) + '/' + str(self.input_size[2]) + '/' + str(self.input_size[3]),
-                           heap_size=160)
-        for i in range(len(self.blocks_params)):
-            layer, shape, _, params = self.blocks_params[i]
-            if len(shape) == 2:
-                shape = [1, 1, shape[0], shape[1]]
-            if len(shape) == 1:
-                shape = [1, 1, 1, shape[0]]
-            # _torch2tvm(layer, torch.randn(shape))
-            _torch2onnx(layer, torch.randn(shape))
-            _onnx2tvm(torch.randn(shape))
-
-            if params + size2memory(shape) + 7 > self.balance_point:
-                blocks_latency = (
-                    _calculate_latency(str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3]),
-                                       heap_size=160),)
-                self.blocks_params[i] = self.blocks_params[i] + blocks_latency
-                self.blocks_params[i] = self.blocks_params[i] + blocks_latency
+        for n, nbrs in self.topo.adjacency():
+            block = self.topo.nodes[n]['model']
+            shape = self.topo.nodes[n]['input_shape']
+            params = self.topo.nodes[n]['params']
+            find_add = list(list(block.children())[0].children())[0]
+            if isinstance(find_add, add):
+                self.topo.add_node(n, normal_latency=1, abnormal_latency=1)
             else:
-                blocks_latency = (
-                    _calculate_latency(str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3]),
-                                       heap_size=self.balance_point),)
-                self.blocks_params[i] = self.blocks_params[i] + blocks_latency
-                blocks_latency = (
-                    _calculate_latency(str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3]),
-                                       heap_size=160),)
-                self.blocks_params[i] = self.blocks_params[i] + blocks_latency
+                shape = self.topo.nodes[n]['input_shape'][0]
+                _torch2onnx(block, torch.randn(shape))
+                _onnx2tvm(torch.randn(shape))
+                if params + size2memory(shape) + 7 > self.balance_point:
+                    blocks_latency = (
+                        _calculate_latency(
+                            str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3]),
+                            heap_size=320),)
+                    self.topo.add_node(n, normal_latency=blocks_latency, abnormal_latency=blocks_latency)
+                else:
+                    blocks_latency = (
+                        _calculate_latency(
+                            str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3]),
+                            heap_size=self.balance_point),)
+                    self.topo.add_node(n, normal_latency=blocks_latency)
+                    blocks_latency = (
+                        _calculate_latency(
+                            str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3]),
+                            heap_size=160),)
+                    self.topo.add_node(n, abnormal_latency=blocks_latency)
 
     def get_block_params(self):
         return self.blocks_params
@@ -293,111 +290,112 @@ class ModelSet:
         policy:  record the policy of n
         :return:
         """
-        # self.blocks_params[0][1] = [0, 0, 0, 0]
-        layers_n = len(self.blocks_params)
-        latency = [[0 for i in range(layers_n)] for i in range(layers_n)]
-        params_table = [[0 for i in range(layers_n)] for i in range(layers_n)]
-        IAs_table = [[0 for i in range(layers_n)] for i in range(layers_n)]
-        for i in range(0, layers_n):
-            latency[i][i] = self.blocks_params[i][4]
-            params_table[i][i] = self.blocks_params[i][3]
-            IAs_table[i][i] = size2memory(self.blocks_params[i][1])
-            for j in range(i+1, layers_n):
-                total_params = 0
-                IAs = 0
-                for idx in range(i, j+1):
-                    total_params += self.blocks_params[idx][3]
-                    IAs = max(IAs, size2memory(self.blocks_params[idx][1]))
-                params_table[i][j] = total_params
-                IAs_table[i][j] = IAs
-                if total_params + IAs + 7 > self.balance_point:
-                    for idx in range(i, j+1):
-                        latency[i][j] += self.blocks_params[idx][5]
-                else:
-                    for idx in range(i, j+1):
-                        latency[i][j] += self.blocks_params[idx][4]
 
-        if smart_flag:
-            upper_bound = latency[-1][-1]/2
-            orgin = []
-            for i in range(layers_n):
-                orgin.append(latency[i][i])
-            print("{:.3f}".format(max(orgin)))
-            peak = max(orgin)
-            # print(max(orgin)-176)
-            flag = [0 for i in range(layers_n)]
-            for i in range(5):
-                idx = 1
-                f = 1
-                while idx < len(orgin):
-                    if orgin[idx] + orgin[idx-1] < peak:
-                        new_val = orgin[idx] + orgin[idx-1]
-                        orgin.pop(idx)
-                        orgin.pop(idx-1)
-                        orgin.insert(idx-1, new_val)
-                        flag[f] = 1
-                        # print(idx)
-                    elif (orgin[idx] + orgin[idx-1] - peak) / peak < 0.1:
-                        peak = orgin[idx] + orgin[idx-1]
-                        orgin.pop(idx)
-                        orgin.pop(idx - 1)
-                        orgin.insert(idx - 1, peak)
-                        flag[f] = 1
-                        # print(idx)
-                    else:
-                        # flag[f] = 2
-                        idx += 1
-                    f += 1
-            print(flag)
-            orgin = [float('{:.3f}'.format(i)) for i in orgin]
-            print('len ', len(orgin))
-            print(orgin)
-            print(max(orgin)*len(orgin))
-            flag.append(-1)
-            self.strategy = flag
-        else:
-            for i in range(layers_n):
-                print(latency[i][i])
-            partition_flag = [[0 for i in range(layers_n)] for i in range(layers_n)]
-            func = [0 for i in range(layers_n+1)]
-            block_latency = [0 for i in range(layers_n + 1)]
-            num_blocks = [0 for i in range(layers_n + 1)]
-            func[1] = latency[0][0]
-            num_blocks[1] = 1
-            block_latency[1] = latency[0][0]
-            for i in range(0, layers_n):
-                point_type = 0
-                min_func = 9999
-                bl = block_latency[i+1]
-                nb = num_blocks[i+1]
-                partition_point = -1
-                for j in range(0, i+1):
-                    trans = 15 * size2memory(self.blocks_params[j][1]) if j > 0 else 0
-                    # old_trans = func[j] - block_latency[j]
-                    # 1. new block 2.combination
-                    if max(latency[j][i], trans) > block_latency[j] and min_func > (max(latency[j][i], trans)) * (num_blocks[j] + 1):
-                        min_func = max(latency[j][i], trans) * (num_blocks[j] + 1)
-                        bl = max(latency[j][i], trans)
-                        nb = num_blocks[j] + 1
-                        partition_point = j
-                    if max(latency[j][i], trans) < block_latency[j] and min_func > (block_latency[j]) * (num_blocks[j] + 1):
-                        min_func = (block_latency[j]) * (num_blocks[j] + 1)
-                        bl = block_latency[j]
-                        nb = num_blocks[j] + 1
-                        partition_point = j
-                func[i+1] = min_func
-                num_blocks[i+1] = nb
-                block_latency[i+1] = bl
-                print('n={} partition point:{} block latency:{:.3f} num_blocks:{} min_func:{:.3f}'.format(i, partition_point, bl, nb, min_func))
-                partition_flag[i][partition_point] = 1
-            self.strategy = partition_flag
-            partition_flag = np.array(partition_flag)
-            latency = np.array(latency)
-            l = 0
-            for i in range(0, layers_n):
-                l += self.blocks_params[i][4]
-            print(l)
-            print(func[-1])
+        # # self.blocks_params[0][1] = [0, 0, 0, 0]
+        # layers_n = len(self.blocks_params)
+        # latency = [[0 for i in range(layers_n)] for i in range(layers_n)]
+        # params_table = [[0 for i in range(layers_n)] for i in range(layers_n)]
+        # IAs_table = [[0 for i in range(layers_n)] for i in range(layers_n)]
+        # for i in range(0, layers_n):
+        #     latency[i][i] = self.blocks_params[i][4]
+        #     params_table[i][i] = self.blocks_params[i][3]
+        #     IAs_table[i][i] = size2memory(self.blocks_params[i][1])
+        #     for j in range(i+1, layers_n):
+        #         total_params = 0
+        #         IAs = 0
+        #         for idx in range(i, j+1):
+        #             total_params += self.blocks_params[idx][3]
+        #             IAs = max(IAs, size2memory(self.blocks_params[idx][1]))
+        #         params_table[i][j] = total_params
+        #         IAs_table[i][j] = IAs
+        #         if total_params + IAs + 7 > self.balance_point:
+        #             for idx in range(i, j+1):
+        #                 latency[i][j] += self.blocks_params[idx][5]
+        #         else:
+        #             for idx in range(i, j+1):
+        #                 latency[i][j] += self.blocks_params[idx][4]
+        #
+        # if smart_flag:
+        #     upper_bound = latency[-1][-1]/2
+        #     orgin = []
+        #     for i in range(layers_n):
+        #         orgin.append(latency[i][i])
+        #     print("{:.3f}".format(max(orgin)))
+        #     peak = max(orgin)
+        #     # print(max(orgin)-176)
+        #     flag = [0 for i in range(layers_n)]
+        #     for i in range(5):
+        #         idx = 1
+        #         f = 1
+        #         while idx < len(orgin):
+        #             if orgin[idx] + orgin[idx-1] < peak:
+        #                 new_val = orgin[idx] + orgin[idx-1]
+        #                 orgin.pop(idx)
+        #                 orgin.pop(idx-1)
+        #                 orgin.insert(idx-1, new_val)
+        #                 flag[f] = 1
+        #                 # print(idx)
+        #             elif (orgin[idx] + orgin[idx-1] - peak) / peak < 0.1:
+        #                 peak = orgin[idx] + orgin[idx-1]
+        #                 orgin.pop(idx)
+        #                 orgin.pop(idx - 1)
+        #                 orgin.insert(idx - 1, peak)
+        #                 flag[f] = 1
+        #                 # print(idx)
+        #             else:
+        #                 # flag[f] = 2
+        #                 idx += 1
+        #             f += 1
+        #     print(flag)
+        #     orgin = [float('{:.3f}'.format(i)) for i in orgin]
+        #     print('len ', len(orgin))
+        #     print(orgin)
+        #     print(max(orgin)*len(orgin))
+        #     flag.append(-1)
+        #     self.strategy = flag
+        # else:
+        #     for i in range(layers_n):
+        #         print(latency[i][i])
+        #     partition_flag = [[0 for i in range(layers_n)] for i in range(layers_n)]
+        #     func = [0 for i in range(layers_n+1)]
+        #     block_latency = [0 for i in range(layers_n + 1)]
+        #     num_blocks = [0 for i in range(layers_n + 1)]
+        #     func[1] = latency[0][0]
+        #     num_blocks[1] = 1
+        #     block_latency[1] = latency[0][0]
+        #     for i in range(0, layers_n):
+        #         point_type = 0
+        #         min_func = 9999
+        #         bl = block_latency[i+1]
+        #         nb = num_blocks[i+1]
+        #         partition_point = -1
+        #         for j in range(0, i+1):
+        #             trans = 15 * size2memory(self.blocks_params[j][1]) if j > 0 else 0
+        #             # old_trans = func[j] - block_latency[j]
+        #             # 1. new block 2.combination
+        #             if max(latency[j][i], trans) > block_latency[j] and min_func > (max(latency[j][i], trans)) * (num_blocks[j] + 1):
+        #                 min_func = max(latency[j][i], trans) * (num_blocks[j] + 1)
+        #                 bl = max(latency[j][i], trans)
+        #                 nb = num_blocks[j] + 1
+        #                 partition_point = j
+        #             if max(latency[j][i], trans) < block_latency[j] and min_func > (block_latency[j]) * (num_blocks[j] + 1):
+        #                 min_func = (block_latency[j]) * (num_blocks[j] + 1)
+        #                 bl = block_latency[j]
+        #                 nb = num_blocks[j] + 1
+        #                 partition_point = j
+        #         func[i+1] = min_func
+        #         num_blocks[i+1] = nb
+        #         block_latency[i+1] = bl
+        #         print('n={} partition point:{} block latency:{:.3f} num_blocks:{} min_func:{:.3f}'.format(i, partition_point, bl, nb, min_func))
+        #         partition_flag[i][partition_point] = 1
+        #     self.strategy = partition_flag
+        #     partition_flag = np.array(partition_flag)
+        #     latency = np.array(latency)
+        #     l = 0
+        #     for i in range(0, layers_n):
+        #         l += self.blocks_params[i][4]
+        #     print(l)
+        #     print(func[-1])
 
     def generate_block_model(self, build_dir='model/'):
         for idx, bp in enumerate(self.blocks_params):
@@ -499,8 +497,8 @@ class ModelSet:
             self._get_block_latency()
             end = time.time()
             print(str((end - start) * 1000) + 'ms')
-            print('partition')
-            self.partition()
+            # print('partition')
+            # self.partition()
 
 
 if __name__ == '__main__':
@@ -513,17 +511,11 @@ if __name__ == '__main__':
 
     model = ResNet(Bottleneck, [3, 4, 6, 3])
     ms = ModelSet(model, (1, 3, 224, 224), unit=[wrapper])
-    # model = [i for i in model.modules()]
-    # g = nx.readwrite.json_graph.node_link_graph(model)
-    # # ms = ModelSet(model, (1, 3, 224, 224), unit=[DenseLayer, Transition, conv_block, Dense_Classifier])
-    # # ms = ModelSet(model, (1, 3, 224, 224), unit=[conv_block, vgg_classifier, nn.MaxPool2d, vgg_fc1, vgg_fc2])
-    # ms = ModelSet(model, (1, 3, 224, 224), unit=[sBasicConv2d, InceptionA, InceptionB, InceptionC, InceptionD,
-    # InceptionE, InceptionAux, inception_classifier, inception_pool])
     total_ops, total_params = profile(model, (torch.randn((1, 3, 224, 224)),), verbose=False)
     print("%s | %.3f MB | %.3fG GFLOPs" % ('model', float(total_params * 4. / (1024 ** 2.)), total_ops / (1000 ** 3)))
     ms.run()
-    # with open('densenet169-new-dp-mul.o', 'wb') as f:
-    #     pickle.dump(ms, f)
+    with open('graph/resnet50.o', 'wb') as f:
+        pickle.dump(ms, f)
 
     # look up for an old partition
     # with open('/home/lifabing/sgx/best-partion/densenet201-dp-mul.o', 'rb') as f:
@@ -533,5 +525,5 @@ if __name__ == '__main__':
         # ms.generate_model()
         # temp = list(ms.blocks_params[21])
 
-    _torch2onnx(model, torch.rand(1, 3, 224, 224))
-    _onnx2tvm(torch.rand(1, 3, 224, 224), build_dir='./')
+    # _torch2onnx(model, torch.rand(1, 3, 224, 224))
+    # _onnx2tvm(torch.rand(1, 3, 224, 224), build_dir='./')
