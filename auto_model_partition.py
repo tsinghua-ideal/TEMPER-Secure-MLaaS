@@ -260,21 +260,18 @@ class ModelSet:
                 _torch2onnx(block, torch.randn(shape))
                 _onnx2tvm(torch.randn(shape))
                 if params + size2memory(shape) + 7 > self.balance_point:
-                    blocks_latency = (
-                        _calculate_latency(
+                    blocks_latency = _calculate_latency(
                             str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3]),
-                            heap_size=320),)
+                            heap_size=320)
                     self.topo.add_node(n, normal_latency=blocks_latency, abnormal_latency=blocks_latency)
                 else:
-                    blocks_latency = (
-                        _calculate_latency(
+                    blocks_latency = _calculate_latency(
                             str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3]),
-                            heap_size=self.balance_point),)
+                            heap_size=self.balance_point)
                     self.topo.add_node(n, normal_latency=blocks_latency)
-                    blocks_latency = (
-                        _calculate_latency(
+                    blocks_latency = _calculate_latency(
                             str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3]),
-                            heap_size=160),)
+                            heap_size=160)
                     self.topo.add_node(n, abnormal_latency=blocks_latency)
 
     def get_block_params(self):
@@ -290,7 +287,52 @@ class ModelSet:
         policy:  record the policy of n
         :return:
         """
-
+        num_nodes = len(self.topo.nodes)
+        cost = [[-1 for i in range(num_nodes)] for i in range(num_nodes)]
+        abnormal_cost = [[-1 for i in range(num_nodes)] for i in range(num_nodes)]
+        normal_cost = [[-1 for i in range(num_nodes)] for i in range(num_nodes)]
+        total_params = [[0 for i in range(num_nodes)] for i in range(num_nodes)]
+        for n in range(num_nodes-1):
+            for j in range(n+1, num_nodes):
+                child = self.topo.nodes[j]
+                fcost = 0
+                fParams = 0
+                fAbnormal = 0
+                fNormal = 0
+                for father in child['model'].input_nodes:
+                    Params = child['params']
+                    Abnormal = child['abnormal_latency']
+                    Normal = child['normal_latency']
+                    IAs = size2memory(child['output_shape'])
+                    while father is not 0 or father is not n:
+                        if size2memory(self.topo.nodes[father]['output_shape']) > IAs:
+                            IAs = size2memory(self.topo.nodes[father]['output_shape'])
+                        if isinstance(list(list(self.topo.nodes[father]['model'].children())[0].children())[0], add):
+                            if Params + total_params[n][father] + 7 + IAs > self.balance_point:
+                                Abnormal = Abnormal + abnormal_cost[n][father]
+                                Normal = Abnormal + abnormal_cost[n][father]
+                            else:
+                                Abnormal = Abnormal + abnormal_cost[n][father]
+                                Normal = Normal + normal_cost[n][father]
+                            Params = Params + total_params[n][father]
+                            break
+                        Params += self.topo.nodes[father]['params']
+                        Abnormal += self.topo.nodes[father]['abnormal_latency']
+                        Normal += self.topo.nodes[father]['normal_latency']
+                        father = self.topo.nodes[father]['model'].input_nodes[0]
+                    if Params + 7 + IAs > self.balance_point and fAbnormal < Abnormal:
+                        fAbnormal = Abnormal
+                        fcost = Abnormal
+                        fParams = Params
+                    elif Params + 7 + IAs < self.balance_point and fNormal < Normal:
+                        fNormal = Normal
+                        fcost = Normal
+                        fParams = Params
+                normal_cost[n][j] = fNormal
+                abnormal_cost[n][j] = fAbnormal
+                cost[n][j] = fcost
+                total_params[n][j] = fParams
+        partition_flag = [[0 for i in range(num_nodes)] for i in range(num_nodes)]
         # # self.blocks_params[0][1] = [0, 0, 0, 0]
         # layers_n = len(self.blocks_params)
         # latency = [[0 for i in range(layers_n)] for i in range(layers_n)]
@@ -518,10 +560,10 @@ if __name__ == '__main__':
         pickle.dump(ms, f)
 
     # look up for an old partition
-    # with open('/home/lifabing/sgx/best-partion/densenet201-dp-mul.o', 'rb') as f:
+    # with open('/home/lifabing/sgx/best-partion/graph/resnet50.o', 'rb') as f:
     #     ms = pickle.load(f)
-    #     ms.partition(smart_flag=True)
-    #     ms.generate_pipeline_model()
+    #     ms.partition()
+        # ms.generate_pipeline_model()
         # ms.generate_model()
         # temp = list(ms.blocks_params[21])
 
