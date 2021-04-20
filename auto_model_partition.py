@@ -150,7 +150,8 @@ def op_extract(op):
 
 
 class ModelSet:
-    def __init__(self, model=None, input_size=None, unit=None, blocks_params=None, expansion=6, balance_point=45, graph_path='graph.json'):
+    def __init__(self, model=None, input_size=None, unit=None, blocks_params=None, expansion=6, balance_point=45,
+                 graph_path='graph.json'):
         """
         :param model: The model (An instance of torch.nn.Module)
         :param input_size: The input size of model input
@@ -237,7 +238,8 @@ class ModelSet:
                     _, params = profile(layer, (it,), verbose=False)
                     input_tensor = layer(input_tensor)
 
-                    topo.add_node(layer.node, model=layer, input_shape=input_shape, output_shape=input_tensor.shape, params=float(params * 4. / (1024 ** 2.)))
+                    topo.add_node(layer.node, model=layer, input_shape=input_shape, output_shape=input_tensor.shape,
+                                  params=float(params * 4. / (1024 ** 2.)))
                     for idx in layer.input_nodes:
                         topo.add_edge(idx, layer.node)
                 # print(layer)
@@ -261,17 +263,17 @@ class ModelSet:
                 _onnx2tvm(torch.randn(shape))
                 if params + size2memory(shape) + 7 > self.balance_point:
                     blocks_latency = _calculate_latency(
-                            str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3]),
-                            heap_size=320)
+                        str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3]),
+                        heap_size=320)
                     self.topo.add_node(n, normal_latency=blocks_latency, abnormal_latency=blocks_latency)
                 else:
                     blocks_latency = _calculate_latency(
-                            str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3]),
-                            heap_size=self.balance_point)
+                        str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3]),
+                        heap_size=self.balance_point)
                     self.topo.add_node(n, normal_latency=blocks_latency)
                     blocks_latency = _calculate_latency(
-                            str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3]),
-                            heap_size=160)
+                        str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3]),
+                        heap_size=160)
                     self.topo.add_node(n, abnormal_latency=blocks_latency)
 
     def get_block_params(self):
@@ -292,8 +294,9 @@ class ModelSet:
         abnormal_cost = [[-1 for i in range(num_nodes)] for i in range(num_nodes)]
         normal_cost = [[-1 for i in range(num_nodes)] for i in range(num_nodes)]
         total_params = [[0 for i in range(num_nodes)] for i in range(num_nodes)]
-        for n in range(num_nodes-1):
-            for j in range(n+1, num_nodes):
+        for n in range(num_nodes - 1):
+            print(n)
+            for j in range(n + 1, num_nodes):
                 child = self.topo.nodes[j]
                 fcost = 0
                 fParams = 0
@@ -439,6 +442,33 @@ class ModelSet:
         #     print(l)
         #     print(func[-1])
 
+    def save_graph_json(self, filename='model_graph.json'):
+        with open(filename, 'w') as f:
+            maxSizePerFPGA = 47185920
+            maxFPGAs = 20
+            maxCPUs = 20
+            nodes = [dict(id=n,
+                          supportedOnFpga=0,
+                          cpuLatency=self.topo.nodes[n]['abnormal_latency'],
+                          fpgaLatency=self.topo.nodes[n]['normal_latency'],
+                          isBackwardNode=0,
+                          size=int(self.topo.nodes[n]['params']) * 1024 * 1024) for n in self.topo.nodes()]
+            edges = [dict(sourceId=u,
+                          destId=v,
+                          cost=size2memory(self.topo.nodes[u]['output_shape'])) for u, v in self.topo.edges()]
+            json.dump(dict(maxSizePerFPGA=maxSizePerFPGA,
+                           maxFPGAs=maxFPGAs,
+                           maxCPUs=maxCPUs,
+                           nodes=nodes,
+                           edges=edges), f)
+
+    def load_graph_json(self, filename='model_graph.json'):
+        G = nx.DiGraph()
+        d = json.load(open(filename))
+        G.add_nodes_from(d['nodes'])
+        G.add_edges_from(d['edges'])
+        self.topo = G
+
     def generate_block_model(self, build_dir='model/'):
         for idx, bp in enumerate(self.blocks_params):
             model = bp[0]
@@ -500,10 +530,10 @@ class ModelSet:
             if not result:
                 return
             index_new = result[0] - 1
-            model = self.blocks_params[index_new+1][0]
-            input_size = self.blocks_params[index_new+1][1]
-            latency = self.blocks_params[index_new+1][4]
-            for i in range(index_new+2, index_old+1):
+            model = self.blocks_params[index_new + 1][0]
+            input_size = self.blocks_params[index_new + 1][1]
+            latency = self.blocks_params[index_new + 1][4]
+            for i in range(index_new + 2, index_old + 1):
                 model = nn.Sequential(model, self.blocks_params[i][0])
                 latency += self.blocks_params[i][4]
             modelset.append((model, input_size))
@@ -551,18 +581,19 @@ if __name__ == '__main__':
     # total_ops, total_params = profile(model, (torch.randn((1, 3, 224, 224)),), verbose=False)
     # print("%s | %.3f MB | %.3fG GFLOPs" % ('model', float(total_params * 4. / (1024 ** 2.)), total_ops / (1000 ** 3)))
 
-    model = ResNet(Bottleneck, [3, 4, 6, 3])
-    ms = ModelSet(model, (1, 3, 224, 224), unit=[wrapper])
-    total_ops, total_params = profile(model, (torch.randn((1, 3, 224, 224)),), verbose=False)
-    print("%s | %.3f MB | %.3fG GFLOPs" % ('model', float(total_params * 4. / (1024 ** 2.)), total_ops / (1000 ** 3)))
-    ms.run()
-    with open('graph/resnet50.o', 'wb') as f:
-        pickle.dump(ms, f)
+    # model = ResNet(Bottleneck, [3, 4, 6, 3])
+    # ms = ModelSet(model, (1, 3, 224, 224), unit=[wrapper])
+    # total_ops, total_params = profile(model, (torch.randn((1, 3, 224, 224)),), verbose=False)
+    # print("%s | %.3f MB | %.3fG GFLOPs" % ('model', float(total_params * 4. / (1024 ** 2.)), total_ops / (1000 ** 3)))
+    # ms.run()
+    # with open('graph/resnet50.o', 'wb') as f:
+    #     pickle.dump(ms, f)
 
     # look up for an old partition
-    # with open('/home/lifabing/sgx/best-partion/graph/resnet50.o', 'rb') as f:
-    #     ms = pickle.load(f)
-    #     ms.partition()
+    with open('/home/lifabing/sgx/best-partion/graph/resnet50.o', 'rb') as f:
+        ms = pickle.load(f)
+        ms.save_graph_json()
+        # ms.partition()
         # ms.generate_pipeline_model()
         # ms.generate_model()
         # temp = list(ms.blocks_params[21])
