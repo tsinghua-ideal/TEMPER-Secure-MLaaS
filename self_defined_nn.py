@@ -28,25 +28,29 @@ class reconstruct(nn.Module):
     def forward(self, x):
         sequence = list(nx.topological_sort(self.topo))
         root = [n for n, d in self.topo.in_degree() if d == 0]
+        leaf = [n for n, d in self.topo.out_degree() if d == 0]
         out = {}
         tensors = []
         for idx, node in enumerate(sequence):
             if node in root:
                 out[node] = idx
                 if isinstance(list(list(self.topo.nodes[node]['model'].children())[0].children())[0], add):
-                    tensors.append(self.model[self.lookup[node]]([x]))
+                    tensors.append(self.model[self.lookup[node]]([x[root.index(node)]]))
                 else:
-                    tensors.append(self.model[self.lookup[node]](x))
+                    tensors.append(self.model[self.lookup[node]](x[root.index(node)]))
             elif isinstance(list(list(self.topo.nodes[node]['model'].children())[0].children())[0], add):
                 temp = []
                 for pred in self.topo.predecessors(node):
-                    temp.append(tensors[out[list(self.topo.predecessors(node))[0]]])
+                    temp.append(tensors[out[pred]])
                 out[node] = idx
                 tensors.append(self.model[self.lookup[node]](temp))
             else:
                 out[node] = idx
                 tensors.append(self.model[self.lookup[node]](tensors[out[list(self.topo.predecessors(node))[0]]]))
-        return tensors[-1]
+        out_tensor = []
+        for lf in leaf:
+            out_tensor.append(tensors[out[lf]])
+        return out_tensor
 
 
 class wrapper(nn.Module):

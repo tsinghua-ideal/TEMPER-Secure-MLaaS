@@ -47,12 +47,12 @@ def getNearPartition(index):
         return partition
 
 
-def _torch2onnx(torch_model, input_tensor):
-    torch.onnx.export(torch_model, input_tensor, "temp.onnx", verbose=False, input_names=['input'],
+def _torch2onnx(torch_model, input_tensor, input_names=['input']):
+    torch.onnx.export(torch_model, input_tensor, "temp.onnx", verbose=False, input_names=input_names,
                       output_names=['output'])
 
 
-def _onnx2tvm(input_tensor, onnx_model='temp.onnx', build_dir='./'):
+def _onnx2tvm(shape_dict, onnx_model='temp.onnx', build_dir='./'):
     """
     compile and optimize the onnx model into TVM model.
     :param input_tensor:
@@ -62,8 +62,7 @@ def _onnx2tvm(input_tensor, onnx_model='temp.onnx', build_dir='./'):
     onnx_model = onnx.load(onnx_model)
     target = 'llvm --system-lib'
 
-    input_name = 'input'
-    shape_dict = {input_name: input_tensor.shape}
+    # shape_dict = {input_name: input_shape}
     mod, params = relay.frontend.from_onnx(onnx_model, shape_dict)
     with relay.build_config(opt_level=3):
         graph, lib, params = relay.build_module.build(
@@ -485,25 +484,32 @@ class ModelSet:
                         model = reconstruct(subgraph)
                         # handle the situation of multiple inputs
                         root = [n for n, d in subgraph.in_degree() if d == 0]
-                        input_tensor = {}
+                        input_tensor = []
+                        input_shape = []
                         for r in root:
-                            input_tensor[r] = torch.rand(input_size)
-                        input_size = self.topo.nodes[root[0]]['input_shape'][0]
+                            input_tensor.append(torch.rand(self.topo.nodes[r]['input_shape'][0]))
+                            input_shape.append(self.topo.nodes[r]['input_shape'][0])
                         number += 1
+                        shape_dict = {}
+                        for i, shape in enumerate(input_shape):
+                            shape_dict['input.{}'.format(i)] = shape
                         path = osp.join(target_model_path, str(number))
                         if not osp.exists(path):
                             os.makedirs(path)
-                        _torch2onnx(model, torch.rand(input_size))
-                        _onnx2tvm(torch.rand(input_size), build_dir=path)
+                        _torch2onnx(model, input_tensor, list(shape_dict.keys()))
+                        _onnx2tvm(shape_dict, build_dir=path)
                     else:
                         model = self.topo.nodes[idx[0]]['model']
-                        input_size = self.topo.nodes[idx[0]]['input_shape'][0]
+                        input_shape = self.topo.nodes[idx[0]]['input_shape'][0]
                         number += 1
+                        shape_dict = {}
+                        for i, shape in enumerate([input_shape]):
+                            shape_dict['input.{}'.format(i)] = shape
                         path = osp.join(target_model_path, str(number))
                         if not osp.exists(path):
                             os.makedirs(path)
-                        _torch2onnx(model, torch.rand(input_size))
-                        _onnx2tvm(torch.rand(input_size), build_dir=path)
+                        _torch2onnx(model, torch.rand(input_shape), list(shape_dict.keys()))
+                        _onnx2tvm(shape_dict, build_dir=path)
 
     def generate_block_model(self, build_dir='model/'):
         for idx, bp in enumerate(self.blocks_params):
