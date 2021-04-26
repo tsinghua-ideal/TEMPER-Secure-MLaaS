@@ -48,7 +48,7 @@ def getNearPartition(index):
 
 
 def _torch2onnx(torch_model, input_tensor):
-    torch.onnx.export(torch_model, input_tensor, "temp.onnx", verbose=True, input_names=['input'],
+    torch.onnx.export(torch_model, input_tensor, "temp.onnx", verbose=False, input_names=['input'],
                       output_names=['output'])
 
 
@@ -336,6 +336,7 @@ class ModelSet:
                 cost[n][j] = fcost
                 total_params[n][j] = fParams
         partition_flag = [[0 for i in range(num_nodes)] for i in range(num_nodes)]
+
         # # self.blocks_params[0][1] = [0, 0, 0, 0]
         # layers_n = len(self.blocks_params)
         # latency = [[0 for i in range(layers_n)] for i in range(layers_n)]
@@ -452,7 +453,7 @@ class ModelSet:
                           cpuLatency=self.topo.nodes[n]['abnormal_latency'],
                           fpgaLatency=self.topo.nodes[n]['normal_latency'],
                           isBackwardNode=0,
-                          size=int(self.topo.nodes[n]['params']) * 1024 * 1024) for n in self.topo.nodes()]
+                          size=int(self.topo.nodes[n]['params'] * 1024 * 1024)) for n in self.topo.nodes()]
             edges = [dict(sourceId=u,
                           destId=v,
                           cost=size2memory(self.topo.nodes[u]['output_shape'])) for u, v in self.topo.edges()]
@@ -468,6 +469,41 @@ class ModelSet:
         G.add_nodes_from(d['nodes'])
         G.add_edges_from(d['edges'])
         self.topo = G
+
+    def generate_dnn_partition(self, result_path, target_model_path):
+        with open(result_path, 'r') as f:
+            result = json.load(f)
+            number = 0
+            for rts in [result['cpus'], result['fpgas']]:
+                for rt in rts:
+                    idx = rt['nodes']
+                    print(idx)
+                    if len(idx) < 1:
+                        continue
+                    elif len(idx) > 1:
+                        subgraph = self.topo.subgraph(idx)
+                        model = reconstruct(subgraph)
+                        # handle the situation of multiple inputs
+                        root = [n for n, d in subgraph.in_degree() if d == 0]
+                        input_tensor = {}
+                        for r in root:
+                            input_tensor[r] = torch.rand(input_size)
+                        input_size = self.topo.nodes[root[0]]['input_shape'][0]
+                        number += 1
+                        path = osp.join(target_model_path, str(number))
+                        if not osp.exists(path):
+                            os.makedirs(path)
+                        _torch2onnx(model, torch.rand(input_size))
+                        _onnx2tvm(torch.rand(input_size), build_dir=path)
+                    else:
+                        model = self.topo.nodes[idx[0]]['model']
+                        input_size = self.topo.nodes[idx[0]]['input_shape'][0]
+                        number += 1
+                        path = osp.join(target_model_path, str(number))
+                        if not osp.exists(path):
+                            os.makedirs(path)
+                        _torch2onnx(model, torch.rand(input_size))
+                        _onnx2tvm(torch.rand(input_size), build_dir=path)
 
     def generate_block_model(self, build_dir='model/'):
         for idx, bp in enumerate(self.blocks_params):
@@ -592,7 +628,9 @@ if __name__ == '__main__':
     # look up for an old partition
     with open('/home/lifabing/sgx/best-partion/graph/resnet50.o', 'rb') as f:
         ms = pickle.load(f)
-        ms.save_graph_json()
+        ms.generate_dnn_partition('/home/lifabing/sgx/best-partion/dnn-partion/resnet50.json',
+                                  '/home/lifabing/sgx/best-partion/dnn-partion/resnet50/')
+        # ms.save_graph_json()
         # ms.partition()
         # ms.generate_pipeline_model()
         # ms.generate_model()

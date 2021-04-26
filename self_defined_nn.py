@@ -7,6 +7,47 @@ from collections import OrderedDict
 from torch import Tensor
 from torch.jit.annotations import List
 
+import networkx as nx
+
+
+class reconstruct(nn.Module):
+    def __init__(self, subgraph):
+        super(reconstruct, self).__init__()
+        self.topo = subgraph
+        # self.model = {}
+        # for node in nx.topological_sort(self.topo):
+        #     # self.model.append(self.topo.nodes[node]['model'])
+        #     self.model[node] = self.topo.nodes[node]['model']
+        self.model = []
+        self.lookup = {}
+        for i, node in enumerate(nx.topological_sort(self.topo)):
+            self.lookup[node] = i
+            self.model.append(self.topo.nodes[node]['model'])
+        self.model = nn.ModuleList(self.model)
+
+    def forward(self, x):
+        sequence = list(nx.topological_sort(self.topo))
+        root = [n for n, d in self.topo.in_degree() if d == 0]
+        out = {}
+        tensors = []
+        for idx, node in enumerate(sequence):
+            if node in root:
+                out[node] = idx
+                if isinstance(list(list(self.topo.nodes[node]['model'].children())[0].children())[0], add):
+                    tensors.append(self.model[self.lookup[node]]([x]))
+                else:
+                    tensors.append(self.model[self.lookup[node]](x))
+            elif isinstance(list(list(self.topo.nodes[node]['model'].children())[0].children())[0], add):
+                temp = []
+                for pred in self.topo.predecessors(node):
+                    temp.append(tensors[out[list(self.topo.predecessors(node))[0]]])
+                out[node] = idx
+                tensors.append(self.model[self.lookup[node]](temp))
+            else:
+                out[node] = idx
+                tensors.append(self.model[self.lookup[node]](tensors[out[list(self.topo.predecessors(node))[0]]]))
+        return tensors[-1]
+
 
 class wrapper(nn.Module):
     index = 0
@@ -176,8 +217,10 @@ class Bottleneck(nn.Module):
         self.stride = stride
 
         self.wp1 = wrapper([conv1x1(inplanes, width), norm_layer(width), nn.ReLU(inplace=True)], input_nodes=[self.ipt])
-        self.wp2 = wrapper([conv3x3(width, width, stride, groups, dilation), norm_layer(width), nn.ReLU(inplace=True)], input_nodes=[self.wp1.node])
-        self.wp3 = wrapper([conv1x1(width, planes * self.expansion), norm_layer(planes * self.expansion)], input_nodes=[self.wp2.node])
+        self.wp2 = wrapper([conv3x3(width, width, stride, groups, dilation), norm_layer(width), nn.ReLU(inplace=True)],
+                           input_nodes=[self.wp1.node])
+        self.wp3 = wrapper([conv1x1(width, planes * self.expansion), norm_layer(planes * self.expansion)],
+                           input_nodes=[self.wp2.node])
         if self.downsample is not None:
             self.downsample = wrapper([downsample], input_nodes=[self.ipt])
             self.concat = wrapper([add([nn.ReLU(inplace=True)])], input_nodes=[self.downsample.node, self.wp3.node])
@@ -290,7 +333,7 @@ class ResNet(nn.Module):
         # self.relu = nn.ReLU(inplace=True)
         # self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         self.conv1 = wrapper([conv_block(3, self.inplanes, kernel_size=7, stride=2, padding=3,
-                                pool=nn.MaxPool2d(kernel_size=3, stride=2, padding=1))], input_nodes=[0])
+                                         pool=nn.MaxPool2d(kernel_size=3, stride=2, padding=1))], input_nodes=[0])
         self.layer1 = self._make_layer(block, 64, layers[0])
         self.layer2 = self._make_layer(block, 128, layers[1], stride=2,
                                        dilate=replace_stride_with_dilation[0])
@@ -298,7 +341,8 @@ class ResNet(nn.Module):
                                        dilate=replace_stride_with_dilation[1])
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2,
                                        dilate=replace_stride_with_dilation[2])
-        self.classifier = wrapper([Classifier(512 * block.expansion, num_classes, (1, 1))], input_nodes=[wrapper.index-1])
+        self.classifier = wrapper([Classifier(512 * block.expansion, num_classes, (1, 1))],
+                                  input_nodes=[wrapper.index - 1])
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -696,8 +740,8 @@ class DenseNet(nn.Module):
         # First convolution
         self.features = nn.Sequential(OrderedDict([
             ('cb', conv_block(3, num_init_features, kernel_size=7, stride=2, padding=3,
-                       pool=nn.MaxPool2d(kernel_size=3, stride=2, padding=1), bn_flag=True)
-                       )]))
+                              pool=nn.MaxPool2d(kernel_size=3, stride=2, padding=1), bn_flag=True)
+             )]))
         # self.features = nn.Sequential(OrderedDict([
         #     ('conv0', nn.Conv2d(3, num_init_features, kernel_size=7, stride=2,
         #                         padding=3, bias=False)),
@@ -721,7 +765,7 @@ class DenseNet(nn.Module):
             num_features = num_features + num_layers * growth_rate
             if i != len(block_config) - 1:
                 trans = Transition(num_input_features=num_features,
-                                    num_output_features=num_features // 2)
+                                   num_output_features=num_features // 2)
                 self.features.add_module('transition%d' % (i + 1), trans)
                 num_features = num_features // 2
 
