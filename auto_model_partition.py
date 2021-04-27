@@ -61,7 +61,8 @@ def _onnx2tvm(shape_dict, onnx_model='temp.onnx', build_dir='./'):
     """
     onnx_model = onnx.load(onnx_model)
     target = 'llvm --system-lib'
-
+    with open(osp.join(build_dir, 'inputs.json'), 'w') as f:
+        f.write(json.dumps(shape_dict))
     # shape_dict = {input_name: input_shape}
     mod, params = relay.frontend.from_onnx(onnx_model, shape_dict)
     with relay.build_config(opt_level=3):
@@ -259,7 +260,7 @@ class ModelSet:
             else:
                 shape = self.topo.nodes[n]['input_shape'][0]
                 _torch2onnx(block, torch.randn(shape))
-                _onnx2tvm(torch.randn(shape))
+                _onnx2tvm({'input': shape})
                 if params + size2memory(shape) + 7 > self.balance_point:
                     blocks_latency = _calculate_latency(
                         str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3]),
@@ -489,11 +490,11 @@ class ModelSet:
                         for r in root:
                             input_tensor.append(torch.rand(self.topo.nodes[r]['input_shape'][0]))
                             input_shape.append(self.topo.nodes[r]['input_shape'][0])
-                        number += 1
                         shape_dict = {}
                         for i, shape in enumerate(input_shape):
                             shape_dict['input.{}'.format(i)] = shape
                         path = osp.join(target_model_path, str(number))
+                        number += 1
                         if not osp.exists(path):
                             os.makedirs(path)
                         _torch2onnx(model, input_tensor, list(shape_dict.keys()))
@@ -501,11 +502,11 @@ class ModelSet:
                     else:
                         model = self.topo.nodes[idx[0]]['model']
                         input_shape = self.topo.nodes[idx[0]]['input_shape'][0]
-                        number += 1
                         shape_dict = {}
                         for i, shape in enumerate([input_shape]):
                             shape_dict['input.{}'.format(i)] = shape
                         path = osp.join(target_model_path, str(number))
+                        number += 1
                         if not osp.exists(path):
                             os.makedirs(path)
                         _torch2onnx(model, torch.rand(input_shape), list(shape_dict.keys()))
@@ -616,26 +617,26 @@ class ModelSet:
 
 
 if __name__ == '__main__':
-    # import torchvision.models as models
+    import torchvision.models as models
     # model = models.vgg16(pretrained=False)
     # _, total_params = profile(model, (torch.rand((1, 3, 224, 224)),), verbose=False)
     # print("%s | %.3f MB" % ('model', float(total_params * 4. / (1024 ** 2.))))
     # total_ops, total_params = profile(model, (torch.randn((1, 3, 224, 224)),), verbose=False)
     # print("%s | %.3f MB | %.3fG GFLOPs" % ('model', float(total_params * 4. / (1024 ** 2.)), total_ops / (1000 ** 3)))
 
-    # model = ResNet(Bottleneck, [3, 4, 6, 3])
-    # ms = ModelSet(model, (1, 3, 224, 224), unit=[wrapper])
-    # total_ops, total_params = profile(model, (torch.randn((1, 3, 224, 224)),), verbose=False)
-    # print("%s | %.3f MB | %.3fG GFLOPs" % ('model', float(total_params * 4. / (1024 ** 2.)), total_ops / (1000 ** 3)))
-    # ms.run()
-    # with open('graph/resnet50.o', 'wb') as f:
-    #     pickle.dump(ms, f)
+    model = ResNet(Bottleneck, [3, 8, 36, 3])
+    ms = ModelSet(model, (1, 3, 224, 224), unit=[wrapper])
+    total_ops, total_params = profile(model, (torch.randn((1, 3, 224, 224)),), verbose=False)
+    print("%s | %.3f MB | %.3fG GFLOPs" % ('model', float(total_params * 4. / (1024 ** 2.)), total_ops / (1000 ** 3)))
+    ms.run()
+    with open('graph/resnet152.o', 'wb') as f:
+        pickle.dump(ms, f)
 
     # look up for an old partition
-    with open('/home/lifabing/sgx/best-partion/graph/resnet50.o', 'rb') as f:
-        ms = pickle.load(f)
-        ms.generate_dnn_partition('/home/lifabing/sgx/best-partion/dnn-partion/resnet50.json',
-                                  '/home/lifabing/sgx/best-partion/dnn-partion/resnet50/')
+    # with open('/home/lifabing/sgx/best-partion/graph/resnet50.o', 'rb') as f:
+    #     ms = pickle.load(f)
+    #     ms.generate_dnn_partition('/home/lifabing/sgx/best-partion/dnn-partion/resnet50.json',
+    #                               '/home/lifabing/sgx/best-partion/dnn-partion/resnet50/')
         # ms.save_graph_json()
         # ms.partition()
         # ms.generate_pipeline_model()
