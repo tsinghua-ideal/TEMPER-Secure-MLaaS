@@ -154,7 +154,7 @@ class separable_conv_block(nn.Module):
 class Classifier(nn.Module):
     def __init__(self, input_planes, num_classes, pool_stride=(1, 1)):
         super(Classifier, self).__init__()
-        self.avgpool = nn.AdaptiveAvgPool2d(pool_stride)
+        self.avgpool = nn.AvgPool2d(pool_stride)
         self.fc = nn.Linear(input_planes, num_classes)
 
     def forward(self, x):
@@ -612,23 +612,24 @@ class Darknet53(nn.Module):
 class _DenseLayer(nn.Module):
     def __init__(self, num_input_features, growth_rate, bn_size, drop_rate, memory_efficient=False):
         super(_DenseLayer, self).__init__()
-        self.add_module('norm1', nn.BatchNorm2d(num_input_features)),
-        self.add_module('relu1', nn.ReLU(inplace=True)),
-        self.add_module('conv1', nn.Conv2d(num_input_features, bn_size *
-                                           growth_rate, kernel_size=1, stride=1,
-                                           bias=False)),
-        self.add_module('norm2', nn.BatchNorm2d(bn_size * growth_rate)),
-        self.add_module('relu2', nn.ReLU(inplace=True)),
-        self.add_module('conv2', nn.Conv2d(bn_size * growth_rate, growth_rate,
-                                           kernel_size=3, stride=1, padding=1,
-                                           bias=False)),
         self.drop_rate = float(drop_rate)
         self.memory_efficient = memory_efficient
+        self.concat = nn.Sequential(concat(dim=1))
+        self.block1 = nn.Sequential(nn.BatchNorm2d(num_input_features), nn.ReLU(inplace=True), nn.Conv2d(num_input_features,
+                               bn_size * growth_rate, kernel_size=1, stride=1, bias=False))
+        if self.drop_rate > 0:
+            self.block2 = nn.Sequential(nn.BatchNorm2d(bn_size * growth_rate), nn.ReLU(inplace=True),
+                                   nn.Conv2d(bn_size * growth_rate, growth_rate, kernel_size=3, stride=1, padding=1,
+                                             bias=False), nn.Dropout(p=self.drop_rate))
+        else:
+            self.block2 = nn.Sequential(nn.BatchNorm2d(bn_size * growth_rate), nn.ReLU(inplace=True),
+                               nn.Conv2d(bn_size * growth_rate, growth_rate, kernel_size=3, stride=1, padding=1,
+                                         bias=False))
 
     def bn_function(self, inputs):
         # type: (List[Tensor]) -> Tensor
-        concated_features = torch.cat(inputs, 1)
-        bottleneck_output = self.conv1(self.relu1(self.norm1(concated_features)))  # noqa: T484
+        bottleneck_output = self.concat(inputs)
+        bottleneck_output = self.block1(bottleneck_output) # noqa: T484
         return bottleneck_output
 
     # todo: rewrite when torchscript supports any
@@ -673,10 +674,7 @@ class _DenseLayer(nn.Module):
         else:
             bottleneck_output = self.bn_function(prev_features)
 
-        new_features = self.conv2(self.relu2(self.norm2(bottleneck_output)))
-        if self.drop_rate > 0:
-            new_features = F.dropout(new_features, p=self.drop_rate,
-                                     training=self.training)
+        new_features = self.block2(bottleneck_output)
         return new_features
 
 
@@ -685,22 +683,27 @@ class DenseBlock(nn.ModuleDict):
 
     def __init__(self, num_layers, num_input_features, bn_size, growth_rate, drop_rate, memory_efficient=False):
         super(DenseBlock, self).__init__()
+        nodes = [wrapper.index-1]
         for i in range(num_layers):
-            layer = _DenseLayer(
+            import copy
+            layer = wrapper([_DenseLayer(
                 num_input_features + i * growth_rate,
                 growth_rate=growth_rate,
                 bn_size=bn_size,
                 drop_rate=drop_rate,
                 memory_efficient=memory_efficient,
-            )
+            )], input_nodes=copy.copy(nodes))
             self.add_module('denselayer%d' % (i + 1), layer)
+            nodes.append(layer.node)
+        self.concat = wrapper([concat(dim=1)], input_nodes=nodes)
 
     def forward(self, init_features):
         features = [init_features]
         for name, layer in self.items():
-            new_features = layer(features)
-            features.append(new_features)
-        return torch.cat(features, 1)
+            if name.startswith('denselayer'):
+                new_features = layer(features)
+                features.append(new_features)
+        return self.concat(features)
 
 
 class Transition(nn.Sequential):
@@ -753,16 +756,9 @@ class DenseNet(nn.Module):
 
         # First convolution
         self.features = nn.Sequential(OrderedDict([
-            ('cb', conv_block(3, num_init_features, kernel_size=7, stride=2, padding=3,
-                              pool=nn.MaxPool2d(kernel_size=3, stride=2, padding=1), bn_flag=True)
+            ('cb', wrapper([conv_block(3, num_init_features, kernel_size=7, stride=2, padding=3,
+                              pool=nn.MaxPool2d(kernel_size=3, stride=2, padding=1), bn_flag=True)], input_nodes=[0])
              )]))
-        # self.features = nn.Sequential(OrderedDict([
-        #     ('conv0', nn.Conv2d(3, num_init_features, kernel_size=7, stride=2,
-        #                         padding=3, bias=False)),
-        #     ('norm0', nn.BatchNorm2d(num_init_features)),
-        #     ('relu0', nn.ReLU(inplace=True)),
-        #     ('pool0', nn.MaxPool2d(kernel_size=3, stride=2, padding=1)),
-        # ]))
 
         # Each denseblock
         num_features = num_init_features
@@ -778,32 +774,15 @@ class DenseNet(nn.Module):
             self.features.add_module('denseblock%d' % (i + 1), block)
             num_features = num_features + num_layers * growth_rate
             if i != len(block_config) - 1:
-                trans = Transition(num_input_features=num_features,
-                                   num_output_features=num_features // 2)
+                trans = wrapper([Transition(num_input_features=num_features,
+                                num_output_features=num_features // 2)], input_nodes=[wrapper.index-1])
                 self.features.add_module('transition%d' % (i + 1), trans)
                 num_features = num_features // 2
 
-        # Final batch norm
-        # self.features.add_module('norm5', nn.BatchNorm2d(num_features))
-
-        # Linear layer
-        self.classifier = Dense_Classifier(num_features, num_classes)
-
-        # Official init from torch repo.
-        # for m in self.modules():
-        #     if isinstance(m, nn.Conv2d):
-        #         nn.init.kaiming_normal_(m.weight)
-        #     elif isinstance(m, nn.BatchNorm2d):
-        #         nn.init.constant_(m.weight, 1)
-        #         nn.init.constant_(m.bias, 0)
-        #     elif isinstance(m, nn.Linear):
-        #         nn.init.constant_(m.bias, 0)
+        self.classifier = wrapper([Dense_Classifier(num_features, num_classes)], input_nodes=[wrapper.index-1])
 
     def forward(self, x):
         features = self.features(x)
-        # out = F.relu(features, inplace=True)
-        # out = F.adaptive_avg_pool2d(out, (1, 1))
-        # out = torch.flatten(out, 1)
         out = self.classifier(features)
         return out
 
@@ -814,7 +793,7 @@ class inception_classifier(nn.Module):
         self.fc = nn.Linear(2048, num_classes)
 
     def forward(self, x):
-        x = F.avg_pool2d(x, (1, 1))
+        x = F.avg_pool2d(x, (7, 7))
         # N x 2048 x 1 x 1
         x = F.dropout(x)
         # N x 2048 x 1 x 1
@@ -837,7 +816,7 @@ class inception_pool(nn.Module):
 
 class Inception3(nn.Module):
 
-    def __init__(self, num_classes=1000, aux_logits=True, transform_input=False,
+    def __init__(self, num_classes=1000, aux_logits=False, transform_input=False,
                  inception_blocks=None):
         super(Inception3, self).__init__()
         if inception_blocks is None:
@@ -856,7 +835,7 @@ class Inception3(nn.Module):
 
         self.aux_logits = aux_logits
         self.transform_input = transform_input
-        self.Conv2d_1a_3x3 = wrapper([conv_block(3, 32, kernel_size=3, stride=2)], input_nodes=[wrapper.index - 1])
+        self.Conv2d_1a_3x3 = wrapper([conv_block(3, 32, kernel_size=3, stride=2)], input_nodes=[0])
         self.Conv2d_2a_3x3 = wrapper([conv_block(32, 32, kernel_size=3)], input_nodes=[wrapper.index - 1])
         self.Conv2d_2b_3x3 = wrapper([conv_block(32, 64, kernel_size=3, padding=1)], input_nodes=[wrapper.index - 1])
         self.pool1 = wrapper([inception_pool()], input_nodes=[wrapper.index - 1])
@@ -876,7 +855,7 @@ class Inception3(nn.Module):
         self.Mixed_7a = inception_d(768)
         self.Mixed_7b = inception_e(1280)
         self.Mixed_7c = inception_e(2048)
-        self.classifier = inception_classifier(num_classes)
+        self.classifier = wrapper([inception_classifier(num_classes)], input_nodes=[wrapper.index - 1])
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
@@ -1097,7 +1076,7 @@ class InceptionD(nn.Module):
 
         self.pool = wrapper([nn.MaxPool2d(kernel_size=3, stride=2)], input_nodes=[self.ipt])
         self.concat = wrapper([concat(dim=1)],
-                              input_nodes=[self.branch3x3.node, self.branch7x7x3_4.node, self.pool.node])
+                              input_nodes=[self.branch3x3_2.node, self.branch7x7x3_4.node, self.pool.node])
 
     def _forward(self, x):
         branch3x3 = self.branch3x3_1(x)
@@ -1108,7 +1087,7 @@ class InceptionD(nn.Module):
         branch7x7x3 = self.branch7x7x3_3(branch7x7x3)
         branch7x7x3 = self.branch7x7x3_4(branch7x7x3)
 
-        branch_pool = self.pool(x, kernel_size=3, stride=2)
+        branch_pool = self.pool(x)
         outputs = self.concat([branch3x3, branch7x7x3, branch_pool])
         return outputs
 
@@ -1177,9 +1156,9 @@ class InceptionAux(nn.Module):
             conv_block = BasicConv2d
         self.conv0 = wrapper([nn.AvgPool2d(kernel_size=5, stride=3), conv_block(in_channels, 128, kernel_size=1)], input_nodes=[self.ipt])
         self.conv1 = wrapper([conv_block(128, 768, kernel_size=5)], input_nodes=[self.conv0.node])
-        self.conv1.stddev = 0.01
+        # self.conv1.stddev = 0.01
         self.fc = wrapper([Classifier(768, num_classes)], input_nodes=[self.conv1.node])
-        self.fc.stddev = 0.001
+        # self.fc.stddev = 0.001
 
     def forward(self, x):
         # N x 768 x 17 x 17

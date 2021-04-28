@@ -226,13 +226,17 @@ class ModelSet:
 
                         input_tensor = torch.rand(input_shape[0])
                         find_add = list(list(layer.children())[0].children())[0]
-                        if isinstance(find_add, add):
+                        if isinstance(find_add, add) or isinstance(find_add, concat):
                             input_tensor = [input_tensor]
                             for idx in range(1, len(input_shape)):
                                 input_tensor.append(torch.rand(input_shape[idx]))
                         else:
                             for idx in range(1, len(layer.input_nodes)):
                                 input_tensor = torch.cat([input_tensor, torch.rand(input_shape[idx])], 1)
+                    layer.eval()
+                    # print(layer.node)
+                    # if layer.node == 2:
+                    #     print()
                     import copy
                     it = copy.copy(input_tensor)
                     _, params = profile(layer, (it,), verbose=False)
@@ -255,12 +259,23 @@ class ModelSet:
             shape = self.topo.nodes[n]['input_shape']
             params = self.topo.nodes[n]['params']
             find_add = list(list(block.children())[0].children())[0]
-            if isinstance(find_add, add):
+            if isinstance(find_add, add) or isinstance(find_add, concat):
                 self.topo.add_node(n, normal_latency=1, abnormal_latency=1)
             else:
-                shape = self.topo.nodes[n]['input_shape'][0]
-                _torch2onnx(block, torch.randn(shape))
-                _onnx2tvm({'input': shape})
+                input_tensor = []
+                input_shape = []
+                for s in self.topo.nodes[n]['input_shape']:
+                    input_tensor.append(torch.rand(s))
+                    input_shape.append(s)
+                shape_dict = {}
+                for i, shape in enumerate(input_shape):
+                    shape_dict['input.{}'.format(i)] = shape
+                if len(input_tensor) > 1:
+                    _torch2onnx(model, input_tensor, list(shape_dict.keys()))
+                    _onnx2tvm(shape_dict)
+                else:
+                    _torch2onnx(model, input_tensor[0])
+                    _onnx2tvm(shape_dict)
                 if params + size2memory(shape) + 7 > self.balance_point:
                     blocks_latency = _calculate_latency(
                         str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3]),
@@ -446,8 +461,8 @@ class ModelSet:
     def save_graph_json(self, filename='model_graph.json'):
         with open(filename, 'w') as f:
             maxSizePerFPGA = 47185920
-            maxFPGAs = 20
-            maxCPUs = 20
+            maxFPGAs = 50
+            maxCPUs = 50
             nodes = [dict(id=n,
                           supportedOnFpga=0,
                           cpuLatency=self.topo.nodes[n]['abnormal_latency'],
@@ -480,7 +495,19 @@ class ModelSet:
                     print(idx)
                     if len(idx) < 1:
                         continue
-                    elif len(idx) > 1:
+                    elif len(idx) == 1 and idx[0] == 0:
+                        model = self.topo.nodes[idx[0]]['model']
+                        input_shape = self.topo.nodes[idx[0]]['input_shape'][0]
+                        shape_dict = {}
+                        for i, shape in enumerate([input_shape]):
+                            shape_dict['input.{}'.format(i)] = shape
+                        path = osp.join(target_model_path, str(number))
+                        number += 1
+                        if not osp.exists(path):
+                            os.makedirs(path)
+                        _torch2onnx(model, torch.rand(input_shape), list(shape_dict.keys()))
+                        _onnx2tvm(shape_dict, build_dir=path)
+                    else:
                         subgraph = self.topo.subgraph(idx)
                         model = reconstruct(subgraph)
                         # handle the situation of multiple inputs
@@ -498,18 +525,6 @@ class ModelSet:
                         if not osp.exists(path):
                             os.makedirs(path)
                         _torch2onnx(model, input_tensor, list(shape_dict.keys()))
-                        _onnx2tvm(shape_dict, build_dir=path)
-                    else:
-                        model = self.topo.nodes[idx[0]]['model']
-                        input_shape = self.topo.nodes[idx[0]]['input_shape'][0]
-                        shape_dict = {}
-                        for i, shape in enumerate([input_shape]):
-                            shape_dict['input.{}'.format(i)] = shape
-                        path = osp.join(target_model_path, str(number))
-                        number += 1
-                        if not osp.exists(path):
-                            os.makedirs(path)
-                        _torch2onnx(model, torch.rand(input_shape), list(shape_dict.keys()))
                         _onnx2tvm(shape_dict, build_dir=path)
 
     def generate_block_model(self, build_dir='model/'):
@@ -624,20 +639,23 @@ if __name__ == '__main__':
     # total_ops, total_params = profile(model, (torch.randn((1, 3, 224, 224)),), verbose=False)
     # print("%s | %.3f MB | %.3fG GFLOPs" % ('model', float(total_params * 4. / (1024 ** 2.)), total_ops / (1000 ** 3)))
 
-    model = ResNet(Bottleneck, [3, 8, 36, 3])
+    # model = ResNet(Bottleneck, [3, 8, 36, 3])
+    model = DenseNet(32, (6, 12, 48, 32), 64)
+    model.eval()
     ms = ModelSet(model, (1, 3, 224, 224), unit=[wrapper])
     total_ops, total_params = profile(model, (torch.randn((1, 3, 224, 224)),), verbose=False)
     print("%s | %.3f MB | %.3fG GFLOPs" % ('model', float(total_params * 4. / (1024 ** 2.)), total_ops / (1000 ** 3)))
     ms.run()
-    with open('graph/resnet152.o', 'wb') as f:
+    with open('graph/densenet201.o', 'wb') as f:
         pickle.dump(ms, f)
 
     # look up for an old partition
-    # with open('/home/lifabing/sgx/best-partion/graph/resnet50.o', 'rb') as f:
+    # with open('/home/lifabing/sgx/best-partion/graph/resnet152.o', 'rb') as f:
     #     ms = pickle.load(f)
-    #     ms.generate_dnn_partition('/home/lifabing/sgx/best-partion/dnn-partion/resnet50.json',
-    #                               '/home/lifabing/sgx/best-partion/dnn-partion/resnet50/')
-        # ms.save_graph_json()
+    #
+    #     # ms.save_graph_json('model_graph.json')
+    #     ms.generate_dnn_partition('/home/lifabing/sgx/best-partion/dnn-partion/resnet152.json',
+    #                               '/home/lifabing/sgx/best-partion/dnn-partion/resnet152/')
         # ms.partition()
         # ms.generate_pipeline_model()
         # ms.generate_model()

@@ -67,9 +67,9 @@
     // println!("{:#?}", &x);
     
     let sy_time = SystemTime::now();
-    exec.set_input("input", x.into());
+    exec.set_input("input.0", x.into());
     exec.run();
-    // let output = exec.get_output(0).unwrap();
+    let output = exec.get_output(0).unwrap();
 
     // let output = output.to_vec::<f32>();
     // find the maximum entry in the output and its index
