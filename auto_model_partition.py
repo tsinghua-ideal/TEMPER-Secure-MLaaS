@@ -47,7 +47,7 @@ def getNearPartition(index):
         return partition
 
 
-def _torch2onnx(torch_model, input_tensor, input_names=['input']):
+def _torch2onnx(torch_model, input_tensor, input_names=['input.0']):
     torch.onnx.export(torch_model, input_tensor, "temp.onnx", verbose=False, input_names=input_names,
                       output_names=['output'])
 
@@ -255,6 +255,7 @@ class ModelSet:
         :return:
         """
         for n, nbrs in self.topo.adjacency():
+            print(n)
             block = self.topo.nodes[n]['model']
             shape = self.topo.nodes[n]['input_shape']
             params = self.topo.nodes[n]['params']
@@ -271,11 +272,12 @@ class ModelSet:
                 for i, shape in enumerate(input_shape):
                     shape_dict['input.{}'.format(i)] = shape
                 if len(input_tensor) > 1:
-                    _torch2onnx(model, input_tensor, list(shape_dict.keys()))
+                    _torch2onnx(block, input_tensor, list(shape_dict.keys()))
                     _onnx2tvm(shape_dict)
                 else:
-                    _torch2onnx(model, input_tensor[0])
+                    _torch2onnx(block, input_tensor[0])
                     _onnx2tvm(shape_dict)
+                shape = input_shape[0]
                 if params + size2memory(shape) + 7 > self.balance_point:
                     blocks_latency = _calculate_latency(
                         str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3]),
@@ -290,6 +292,8 @@ class ModelSet:
                         str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3]),
                         heap_size=160)
                     self.topo.add_node(n, abnormal_latency=blocks_latency)
+            with open('graph/Inception3.o', 'wb') as f:
+                pickle.dump(self.topo, f)
 
     def get_block_params(self):
         return self.blocks_params
@@ -640,13 +644,15 @@ if __name__ == '__main__':
     # print("%s | %.3f MB | %.3fG GFLOPs" % ('model', float(total_params * 4. / (1024 ** 2.)), total_ops / (1000 ** 3)))
 
     # model = ResNet(Bottleneck, [3, 8, 36, 3])
-    model = DenseNet(32, (6, 12, 48, 32), 64)
+    # model = DenseNet(32, (6, 12, 48, 32), 64)
+    model = Inception3()
     model.eval()
-    ms = ModelSet(model, (1, 3, 224, 224), unit=[wrapper])
-    total_ops, total_params = profile(model, (torch.randn((1, 3, 224, 224)),), verbose=False)
+    input_size = (1, 3, 299, 299)
+    ms = ModelSet(model, input_size, unit=[wrapper])
+    total_ops, total_params = profile(model, (torch.randn(input_size),), verbose=False)
     print("%s | %.3f MB | %.3fG GFLOPs" % ('model', float(total_params * 4. / (1024 ** 2.)), total_ops / (1000 ** 3)))
     ms.run()
-    with open('graph/densenet201.o', 'wb') as f:
+    with open('graph/Inception3.o', 'wb') as f:
         pickle.dump(ms, f)
 
     # look up for an old partition

@@ -10,7 +10,7 @@ sed -i "s/tobereplaced/$hp/g" Cargo.toml
 s=$PATH
 export PATH=$1:$PATH
 cargo clean
-cargo run --target x86_64-fortanix-unknown-sgx 2>>/dev/null
+rm -rf ~/.cargo/.package-cache && cargo run 2>>/dev/null
 path=target/x86_64-fortanix-unknown-sgx/debug/sgx-demo.sgxs
 for j in {0..1};
 do
