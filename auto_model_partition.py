@@ -23,30 +23,6 @@ import subprocess
 import pickle
 
 
-def isRightChild(index):
-    if (index - 1) % 2 == 1:
-        return True
-    else:
-        return False
-
-
-def getNearPartition(index):
-    """
-
-    :param index:
-    :return: the layer number of the node.
-    """
-    partition = [int(math.log2(index + 1))]
-    if index == 0:
-        return partition
-    else:
-        index = int((index - 1) / 2)
-        while not isRightChild(index):
-            partition.append(int(math.log2(index + 1)))
-            index = int((index - 1) / 2)
-        return partition
-
-
 def _torch2onnx(torch_model, input_tensor, input_names=['input.0']):
     torch.onnx.export(torch_model, input_tensor, "temp.onnx", verbose=False, input_names=input_names,
                       output_names=['output'])
@@ -81,7 +57,7 @@ def _onnx2tvm(shape_dict, onnx_model='temp.onnx', build_dir='./'):
 
 def _torch2tvm(torch_model, input_tensor):
     """
-    Transform a torch model into a TVM one. This function is preferred.
+    Transform a torch model into a TVM one. This function is preferred. But APIs seem to be unavailable
     :param torch_model:
     :param input_tensor:
     :return:
@@ -141,6 +117,13 @@ def size2memory(size):
     from functools import reduce
     ln = reduce(lambda x, y: x * y, size)
     return ln * 4 / 1024 / 1024
+
+
+def standlize_shape(shape):
+    shape = list(shape)
+    while len(shape) < 4:
+        shape.insert(0, 1)
+    return shape
 
 
 def op_extract(op):
@@ -263,12 +246,12 @@ class ModelSet:
         calculate the latency of each block
         :return:
         """
+        self.load_from_checkpoints()
         for n, nbrs in self.topo.adjacency():
-            print(n)
-            if n == -1:
+            if n == -1 or (self.checkpoints is not None and not n > self.checkpoints):
                 continue
+            print(n)
             block = self.topo.nodes[n]['model'].eval()
-            shape = self.topo.nodes[n]['input_shape']
             params = self.topo.nodes[n]['params']
             find_add = list(list(block.children())[0].children())[0]
             if isinstance(find_add, add) or isinstance(find_add, concat):
@@ -288,7 +271,7 @@ class ModelSet:
                 else:
                     _torch2onnx(block, input_tensor[0])
                     _onnx2tvm(shape_dict)
-                shape = input_shape[0]
+                shape = standlize_shape(input_shape[0])
                 if params + size2memory(shape) + 7 > self.balance_point:
                     blocks_latency = _calculate_latency(
                         str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3]),
@@ -474,6 +457,7 @@ class ModelSet:
         #     print(func[-1])
 
     def save_graph_json(self, filename='model_graph.json'):
+        topo = self.topo.remove_node(-1)
         with open(filename, 'w') as f:
             maxSizePerFPGA = 47185920
             maxFPGAs = 50
@@ -483,10 +467,10 @@ class ModelSet:
                           cpuLatency=self.topo.nodes[n]['abnormal_latency'],
                           fpgaLatency=self.topo.nodes[n]['normal_latency'],
                           isBackwardNode=0,
-                          size=int(self.topo.nodes[n]['params'] * 1024 * 1024)) for n in self.topo.nodes()]
+                          size=int(self.topo.nodes[n]['params'] * 1024 * 1024)) for n in self.topo.nodes() if n > -1]
             edges = [dict(sourceId=u,
                           destId=v,
-                          cost=size2memory(self.topo.nodes[u]['output_shape'])) for u, v in self.topo.edges()]
+                          cost=size2memory(self.topo.nodes[u]['output_shape'])) for u, v in self.topo.edges() if u > -1]
             json.dump(dict(maxSizePerFPGA=maxSizePerFPGA,
                            maxFPGAs=maxFPGAs,
                            maxCPUs=maxCPUs,

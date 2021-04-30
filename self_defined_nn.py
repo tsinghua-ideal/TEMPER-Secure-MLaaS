@@ -25,8 +25,6 @@ class reconstruct(nn.Module):
 
     def forward(self, x):
         for node in self.node_map.keys():
-            if node == 0:
-                print()
             tensors = []
             for father in self.node_map[node]:
                 tensors.append(x[father])
@@ -440,11 +438,7 @@ class vgg_fc1(nn.ModuleDict):
         self.in_ch = int(in_channels / slice_num)
         self.vsplit = wrapper([split(slice_num)], input_nodes=[start_node])
         for i in range(slice_num):
-            layer = wrapper([nn.Sequential(
-                nn.Linear(self.in_ch, out_channels),
-                nn.ReLU(True),
-                nn.Dropout(),
-            )], input_nodes=[self.vsplit.node])
+            layer = wrapper([vgg_slice(self.in_ch, out_channels, i)], input_nodes=[self.vsplit.node])
             self.add_module('fc%d' % (i + 1), layer)
             nodes.append(layer.node)
         self.add = wrapper([add()], input_nodes=nodes)
@@ -452,25 +446,25 @@ class vgg_fc1(nn.ModuleDict):
     def forward(self, x):
         x = self.vsplit(x)
         features = []
-        for i, (name, layer) in enumerate(self.items()):
+        for name, layer in self.items():
             if name.startswith('fc'):
-                new_features = layer(x[i-1])
+                new_features = layer(x)
                 features.append(new_features)
         return self.add(features)
 
 
-class vgg_fc2(nn.Module):
-    def __init__(self, in_channels=512 * 7 * 7):
-        super(vgg_fc2, self).__init__()
-        # self.avgpool = nn.MaxPool2d((2, 2))
+class vgg_slice(nn.Module):
+    def __init__(self, in_channels=512 * 7 * 7, out_channels=4096, index=0):
+        super(vgg_slice, self).__init__()
+        self.index = index
         self.classifier = nn.Sequential(
-            nn.Linear(in_channels, 4096),
+            nn.Linear(in_channels, out_channels),
             nn.ReLU(True),
             nn.Dropout(),
         )
 
     def forward(self, x):
-        x = self.classifier(x)
+        x = self.classifier(x[self.index])
         return x
 
 
