@@ -80,6 +80,18 @@ class concat(nn.Module):
         return out
 
 
+class split(nn.Module):
+    def __init__(self, slices=1):
+        super(split, self).__init__()
+        self.slices = slices
+
+    def forward(self, x):
+        features = []
+        for i in range(self.slices):
+            features.append(x[:, i*int(x.shape[1]/self.slices):(i+1)*int(x.shape[1]/self.slices)])
+        return features
+
+
 class conv_block(nn.Module):
     def __init__(self, input_channels, out_channels, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), pool=None,
                  bn_flag=True):
@@ -412,28 +424,39 @@ class ResNet(nn.Module):
 class vgg_pool(nn.Module):
     def __init__(self):
         super(vgg_pool, self).__init__()
-        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.pool = nn.AvgPool2d(kernel_size=1, stride=1)
 
     def forward(self, x):
         x = self.pool(x)
+        x = torch.flatten(x, 1)
         return x
 
 
-class vgg_fc1(nn.Module):
-    def __init__(self, in_channels=512 * 7 * 7):
+class vgg_fc1(nn.ModuleDict):
+    def __init__(self, in_channels=512 * 7 * 7, out_channels=4096, slice_num=8):
         super(vgg_fc1, self).__init__()
-        # self.avgpool = nn.MaxPool2d((2, 2))
-        self.classifier = nn.Sequential(
-            nn.Linear(in_channels, 4096),
-            nn.ReLU(True),
-            nn.Dropout(),
-        )
+        start_node = wrapper.index-1
+        nodes = []
+        self.in_ch = int(in_channels / slice_num)
+        self.vsplit = wrapper([split(slice_num)], input_nodes=[start_node])
+        for i in range(slice_num):
+            layer = wrapper([nn.Sequential(
+                nn.Linear(self.in_ch, out_channels),
+                nn.ReLU(True),
+                nn.Dropout(),
+            )], input_nodes=[self.vsplit.node])
+            self.add_module('fc%d' % (i + 1), layer)
+            nodes.append(layer.node)
+        self.add = wrapper([add()], input_nodes=nodes)
 
     def forward(self, x):
-        # x = self.avgpool(x)
-        x = torch.flatten(x, 1)
-        x = self.classifier(x)
-        return x
+        x = self.vsplit(x)
+        features = []
+        for i, (name, layer) in enumerate(self.items()):
+            if name.startswith('fc'):
+                new_features = layer(x[i-1])
+                features.append(new_features)
+        return self.add(features)
 
 
 class vgg_fc2(nn.Module):
@@ -447,7 +470,6 @@ class vgg_fc2(nn.Module):
         )
 
     def forward(self, x):
-        # x = self.avgpool(x)
         x = self.classifier(x)
         return x
 
@@ -455,7 +477,6 @@ class vgg_fc2(nn.Module):
 class vgg_classifier(nn.Module):
     def __init__(self, num_classes=1000):
         super(vgg_classifier, self).__init__()
-        # self.avgpool = nn.MaxPool2d((2, 2))
         self.classifier = nn.Linear(4096, num_classes)
 
     def forward(self, x):
@@ -468,15 +489,17 @@ class VGG(nn.Module):
     def __init__(self, features, num_classes=1000, init_weights=True):
         super(VGG, self).__init__()
         self.features = features
-        self.fc1 = vgg_fc1(512 * 7 * 7)
-        self.fc2 = vgg_fc2(4096)
-        self.classifier = vgg_classifier(num_classes)
+        self.vpool = wrapper([vgg_pool()], input_nodes=[wrapper.index-1])
+        self.fc1 = vgg_fc1(in_channels=512 * 7 * 7, out_channels=4096, slice_num=8)
+        self.fc2 = vgg_fc1(in_channels=4096, out_channels=4096, slice_num=8)
+        self.classifier = wrapper([vgg_classifier(num_classes)], input_nodes=[wrapper.index-1])
         if init_weights:
             self._initialize_weights()
 
     def forward(self, x):
         x = self.features(x)
         # print(x.size())
+        x = self.vpool(x)
         x = self.fc1(x)
         x = self.fc2(x)
         x = self.classifier(x)
@@ -501,17 +524,17 @@ def make_layers(cfg, batch_norm=False):
     in_channels = 3
     for v in cfg:
         if v == 'M':
-            layers += [nn.MaxPool2d(kernel_size=2, stride=2)]
+            layers += [wrapper([nn.MaxPool2d(kernel_size=2, stride=2)], input_nodes=[wrapper.index-1])]
             # layers += [vgg_pool()]
             continue
         else:
             # conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=1)
             if batch_norm:
                 # layers += [conv2d, nn.BatchNorm2d(v), nn.ReLU(inplace=True)]
-                layers += [conv_block(in_channels, v, kernel_size=3, stride=1, padding=1)]
+                layers += [wrapper([conv_block(in_channels, v, kernel_size=3, stride=1, padding=1)], input_nodes=[wrapper.index-1])]
             else:
                 # layers += [conv2d, nn.ReLU(inplace=True)]
-                layers += [conv_block(in_channels, v, kernel_size=3, stride=1, padding=1, bn_flag=False)]
+                layers += [wrapper([conv_block(in_channels, v, kernel_size=3, stride=1, padding=1, bn_flag=False)], input_nodes=[wrapper.index-1])]
             in_channels = v
     return nn.Sequential(*layers)
 

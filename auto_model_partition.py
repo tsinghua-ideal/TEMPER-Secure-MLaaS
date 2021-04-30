@@ -188,7 +188,7 @@ class ModelSet:
             # nx.draw(topo)
             # plt.show()
 
-    def load_from_checkpoints(self, file='/home/lifabing/sgx/best-partion/graph/checkpoints/inception3.o'):
+    def load_from_checkpoints(self, file='/home/lifabing/sgx/best-partion/graph/checkpoints/checkpoints.o'):
         with open(file, 'rb') as f:
             self.checkpoints, self.topo = pickle.load(f)
 
@@ -217,6 +217,9 @@ class ModelSet:
         The first step of calculation, calculate the parameter size of the given model
         """
         topo = nx.MultiDiGraph()
+        topo.add_node(-1, model=None, input_shape=[],
+                      output_shape=self.input_size,
+                      params=0)
         input_tensor = None
         for layer in self.model.modules():
             for block in self.unit:
@@ -246,7 +249,8 @@ class ModelSet:
                     it = copy.copy(input_tensor)
                     _, params = profile(layer, (it,), verbose=False)
                     input_tensor = layer(input_tensor)
-
+                    if len(input_tensor) > 1:
+                        input_tensor = input_tensor[0]
                     topo.add_node(layer.node, model=layer, input_shape=input_shape, output_shape=input_tensor.shape,
                                   params=float(params * 4. / (1024 ** 2.)))
                     for idx in layer.input_nodes:
@@ -261,6 +265,8 @@ class ModelSet:
         """
         for n, nbrs in self.topo.adjacency():
             print(n)
+            if n == -1:
+                continue
             block = self.topo.nodes[n]['model'].eval()
             shape = self.topo.nodes[n]['input_shape']
             params = self.topo.nodes[n]['params']
@@ -297,7 +303,7 @@ class ModelSet:
                         str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3]),
                         heap_size=160)
                     self.topo.add_node(n, abnormal_latency=blocks_latency)
-            with open('graph/checkpoints/inception3.o', 'wb') as f:
+            with open('graph/checkpoints/checkpoints.o', 'wb') as f:
                 pickle.dump((n, self.topo), f)
 
     def get_block_params(self):
@@ -509,16 +515,16 @@ class ModelSet:
                         input_shape = []
                         fathers = []
                         node_map = {}
-                        if idx[0] == 0:
-                            self.topo.remove_edge(0, 0)
-                            self.topo.add_node(-1, model=None, input_shape=[],
-                                               output_shape=self.topo.nodes[0]['input_shape'][0],
-                                               params=0)
-                            self.topo.add_edge(-1, 0)
-                            # input_tensor = [torch.rand(self.topo.nodes[0]['input_shape'])]
-                            # input_shape = [self.topo.nodes[0]['input_shape']]
-                            # fathers = [0]
-                            # node_map[0] = [0]
+                        # if idx[0] == 0:
+                        #     self.topo.remove_edge(0, 0)
+                        #     self.topo.add_node(-1, model=None, input_shape=[],
+                        #                        output_shape=self.topo.nodes[0]['input_shape'][0],
+                        #                        params=0)
+                        #     self.topo.add_edge(-1, 0)
+                        # input_tensor = [torch.rand(self.topo.nodes[0]['input_shape'])]
+                        # input_shape = [self.topo.nodes[0]['input_shape']]
+                        # fathers = [0]
+                        # node_map[0] = [0]
                         subgraph = self.topo.subgraph(idx)
                         for node in nx.topological_sort(subgraph):
                             node_input = []
@@ -655,6 +661,7 @@ class ModelSet:
 
 if __name__ == '__main__':
     import torchvision.models as models
+
     # model = models.vgg16(pretrained=False)
     # _, total_params = profile(model, (torch.rand((1, 3, 224, 224)),), verbose=False)
     # print("%s | %.3f MB" % ('model', float(total_params * 4. / (1024 ** 2.))))
@@ -663,14 +670,15 @@ if __name__ == '__main__':
 
     # model = ResNet(Bottleneck, [3, 8, 36, 3])
     # model = DenseNet(32, (6, 12, 48, 32), 64)
-    model = Inception3()
+    # model = Inception3()
+    model = get_vgg('E', False)
     model.eval()
-    input_size = (1, 3, 299, 299)
+    input_size = (1, 3, 224, 224)
     ms = ModelSet(model, input_size, unit=[wrapper])
     total_ops, total_params = profile(model, (torch.randn(input_size),), verbose=False)
     print("%s | %.3f MB | %.3fG GFLOPs" % ('model', float(total_params * 4. / (1024 ** 2.)), total_ops / (1000 ** 3)))
     ms.run()
-    with open('graph/Inception3.o', 'wb') as f:
+    with open('graph/vgg19.o', 'wb') as f:
         pickle.dump(ms, f)
 
     # look up for an old partition
@@ -680,10 +688,10 @@ if __name__ == '__main__':
     #     # ms.save_graph_json('model_graph.json')
     #     ms.generate_dnn_partition('/home/lifabing/sgx/best-partion/dnn-partion/resnet152.json',
     #                               '/home/lifabing/sgx/best-partion/dnn-partion/resnet152/')
-        # ms.partition()
-        # ms.generate_pipeline_model()
-        # ms.generate_model()
-        # temp = list(ms.blocks_params[21])
+    # ms.partition()
+    # ms.generate_pipeline_model()
+    # ms.generate_model()
+    # temp = list(ms.blocks_params[21])
 
     # _torch2onnx(model, torch.rand(1, 3, 224, 224))
     # _onnx2tvm(torch.rand(1, 3, 224, 224), build_dir='./')
