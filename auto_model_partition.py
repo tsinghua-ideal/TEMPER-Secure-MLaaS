@@ -171,6 +171,7 @@ class ModelSet:
         self.strategy = None
         self.graph_path = graph_path
         self.topo = None
+        self.checkpoints = None
         # self._generate_topo()
 
     def _generate_topo(self):
@@ -186,6 +187,10 @@ class ModelSet:
             self.topo = topo
             # nx.draw(topo)
             # plt.show()
+
+    def load_from_checkpoints(self, file='/home/lifabing/sgx/best-partion/graph/checkpoints/inception3.o'):
+        with open(file, 'rb') as f:
+            self.checkpoints, self.topo = pickle.load(f)
 
     def reinit(self, model, input_size, unit, blocks_params=None):
         """
@@ -256,7 +261,7 @@ class ModelSet:
         """
         for n, nbrs in self.topo.adjacency():
             print(n)
-            block = self.topo.nodes[n]['model']
+            block = self.topo.nodes[n]['model'].eval()
             shape = self.topo.nodes[n]['input_shape']
             params = self.topo.nodes[n]['params']
             find_add = list(list(block.children())[0].children())[0]
@@ -292,8 +297,8 @@ class ModelSet:
                         str(shape[0]) + '/' + str(shape[1]) + '/' + str(shape[2]) + '/' + str(shape[3]),
                         heap_size=160)
                     self.topo.add_node(n, abnormal_latency=blocks_latency)
-            with open('graph/Inception3.o', 'wb') as f:
-                pickle.dump(self.topo, f)
+            with open('graph/checkpoints/inception3.o', 'wb') as f:
+                pickle.dump((n, self.topo), f)
 
     def get_block_params(self):
         return self.blocks_params
@@ -499,28 +504,40 @@ class ModelSet:
                     print(idx)
                     if len(idx) < 1:
                         continue
-                    elif len(idx) == 1 and idx[0] == 0:
-                        model = self.topo.nodes[idx[0]]['model']
-                        input_shape = self.topo.nodes[idx[0]]['input_shape'][0]
-                        shape_dict = {}
-                        for i, shape in enumerate([input_shape]):
-                            shape_dict['input.{}'.format(i)] = shape
-                        path = osp.join(target_model_path, str(number))
-                        number += 1
-                        if not osp.exists(path):
-                            os.makedirs(path)
-                        _torch2onnx(model, torch.rand(input_shape), list(shape_dict.keys()))
-                        _onnx2tvm(shape_dict, build_dir=path)
                     else:
-                        subgraph = self.topo.subgraph(idx)
-                        model = reconstruct(subgraph)
-                        # handle the situation of multiple inputs
-                        root = [n for n, d in subgraph.in_degree() if d == 0]
                         input_tensor = []
                         input_shape = []
-                        for r in root:
-                            input_tensor.append(torch.rand(self.topo.nodes[r]['input_shape'][0]))
-                            input_shape.append(self.topo.nodes[r]['input_shape'][0])
+                        fathers = []
+                        node_map = {}
+                        if idx[0] == 0:
+                            self.topo.remove_edge(0, 0)
+                            self.topo.add_node(-1, model=None, input_shape=[],
+                                               output_shape=self.topo.nodes[0]['input_shape'][0],
+                                               params=0)
+                            self.topo.add_edge(-1, 0)
+                            # input_tensor = [torch.rand(self.topo.nodes[0]['input_shape'])]
+                            # input_shape = [self.topo.nodes[0]['input_shape']]
+                            # fathers = [0]
+                            # node_map[0] = [0]
+                        subgraph = self.topo.subgraph(idx)
+                        for node in nx.topological_sort(subgraph):
+                            node_input = []
+                            for father in self.topo.predecessors(node):
+                                if father not in fathers:
+                                    fathers.append(father)
+                                    input_tensor.append(torch.rand(self.topo.nodes[father]['output_shape']))
+                                    input_shape.append(self.topo.nodes[father]['output_shape'])
+                                node_input.append(fathers.index(father))
+                            node_map[node] = node_input
+
+                        model = reconstruct(subgraph, node_map, fathers)
+                        # handle the situation of multiple inputs
+                        # root = [n for n, d in subgraph.in_degree() if d == 0]
+                        # input_tensor = []
+                        # input_shape = []
+                        # for r in root:
+                        #     input_tensor.append(torch.rand(self.topo.nodes[r]['input_shape'][0]))
+                        #     input_shape.append(self.topo.nodes[r]['input_shape'][0])
                         shape_dict = {}
                         for i, shape in enumerate(input_shape):
                             shape_dict['input.{}'.format(i)] = shape
@@ -625,6 +642,7 @@ class ModelSet:
         :return: An generator of strategies of partitions
         """
         if not self.blocks_params:
+            # self.load_from_checkpoints()
             self._stat_layer_params()
             import time
             start = time.time()

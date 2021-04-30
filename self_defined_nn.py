@@ -11,13 +11,11 @@ import networkx as nx
 
 
 class reconstruct(nn.Module):
-    def __init__(self, subgraph):
+    def __init__(self, subgraph, node_map, fathers):
         super(reconstruct, self).__init__()
         self.topo = subgraph
-        # self.model = {}
-        # for node in nx.topological_sort(self.topo):
-        #     # self.model.append(self.topo.nodes[node]['model'])
-        #     self.model[node] = self.topo.nodes[node]['model']
+        self.node_map = node_map
+        self.father = fathers
         self.model = []
         self.lookup = {}
         for i, node in enumerate(nx.topological_sort(self.topo)):
@@ -26,31 +24,19 @@ class reconstruct(nn.Module):
         self.model = nn.ModuleList(self.model)
 
     def forward(self, x):
-        sequence = list(nx.topological_sort(self.topo))
-        root = [n for n, d in self.topo.in_degree() if d == 0]
-        leaf = [n for n, d in self.topo.out_degree() if d == 0]
-        out = {}
-        tensors = []
-        for idx, node in enumerate(sequence):
-            if node in root:
-                out[node] = idx
-                if isinstance(list(list(self.topo.nodes[node]['model'].children())[0].children())[0], add):
-                    tensors.append(self.model[self.lookup[node]]([x[root.index(node)]]))
-                else:
-                    tensors.append(self.model[self.lookup[node]](x[root.index(node)]))
-            elif isinstance(list(list(self.topo.nodes[node]['model'].children())[0].children())[0], add):
-                temp = []
-                for pred in self.topo.predecessors(node):
-                    temp.append(tensors[out[pred]])
-                out[node] = idx
-                tensors.append(self.model[self.lookup[node]](temp))
+        for node in self.node_map.keys():
+            if node == 0:
+                print()
+            tensors = []
+            for father in self.node_map[node]:
+                tensors.append(x[father])
+            if len(tensors) == 1:
+                tensors = tensors[0]
+            if node not in self.father:
+                x.append(self.model[self.lookup[node]](tensors))
             else:
-                out[node] = idx
-                tensors.append(self.model[self.lookup[node]](tensors[out[list(self.topo.predecessors(node))[0]]]))
-        out_tensor = []
-        for lf in leaf:
-            out_tensor.append(tensors[out[lf]])
-        return out_tensor
+                x[self.father.index(node)] = self.model[self.lookup[node]](tensors)
+        return x[-1]
 
 
 class wrapper(nn.Module):
@@ -790,12 +776,14 @@ class DenseNet(nn.Module):
 class inception_classifier(nn.Module):
     def __init__(self, num_classes):
         super(inception_classifier, self).__init__()
+        self.pool = nn.AvgPool2d((7, 7))
+        self.dropout = nn.Dropout()
         self.fc = nn.Linear(2048, num_classes)
 
     def forward(self, x):
-        x = F.avg_pool2d(x, (7, 7))
+        x = self.pool(x)
         # N x 2048 x 1 x 1
-        x = F.dropout(x)
+        x = self.dropout(x)
         # N x 2048 x 1 x 1
         x = torch.flatten(x, 1)
         # N x 2048
