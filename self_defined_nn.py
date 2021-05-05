@@ -30,6 +30,8 @@ class reconstruct(nn.Module):
                 tensors.append(x[father])
             if len(tensors) == 1:
                 tensors = tensors[0]
+                if isinstance(tensors, list):
+                    tensors = tensors[0]
             if node not in self.father:
                 x.append(self.model[self.lookup[node]](tensors))
             else:

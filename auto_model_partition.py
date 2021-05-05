@@ -246,7 +246,7 @@ class ModelSet:
         calculate the latency of each block
         :return:
         """
-        self.load_from_checkpoints()
+        # self.load_from_checkpoints()
         for n, nbrs in self.topo.adjacency():
             if n == -1 or (self.checkpoints is not None and not n > self.checkpoints):
                 continue
@@ -463,7 +463,7 @@ class ModelSet:
             maxFPGAs = 50
             maxCPUs = 50
             nodes = [dict(id=n,
-                          supportedOnFpga=0,
+                          supportedOnFpga=1,
                           cpuLatency=self.topo.nodes[n]['abnormal_latency'],
                           fpgaLatency=self.topo.nodes[n]['normal_latency'],
                           isBackwardNode=0,
@@ -495,20 +495,11 @@ class ModelSet:
                     if len(idx) < 1:
                         continue
                     else:
+                        # handle the situation of multiple inputs
                         input_tensor = []
                         input_shape = []
                         fathers = []
                         node_map = {}
-                        # if idx[0] == 0:
-                        #     self.topo.remove_edge(0, 0)
-                        #     self.topo.add_node(-1, model=None, input_shape=[],
-                        #                        output_shape=self.topo.nodes[0]['input_shape'][0],
-                        #                        params=0)
-                        #     self.topo.add_edge(-1, 0)
-                        # input_tensor = [torch.rand(self.topo.nodes[0]['input_shape'])]
-                        # input_shape = [self.topo.nodes[0]['input_shape']]
-                        # fathers = [0]
-                        # node_map[0] = [0]
                         subgraph = self.topo.subgraph(idx)
                         for node in nx.topological_sort(subgraph):
                             node_input = []
@@ -519,18 +510,10 @@ class ModelSet:
                                     input_shape.append(self.topo.nodes[father]['output_shape'])
                                 node_input.append(fathers.index(father))
                             node_map[node] = node_input
-
                         model = reconstruct(subgraph, node_map, fathers)
-                        # handle the situation of multiple inputs
-                        # root = [n for n, d in subgraph.in_degree() if d == 0]
-                        # input_tensor = []
-                        # input_shape = []
-                        # for r in root:
-                        #     input_tensor.append(torch.rand(self.topo.nodes[r]['input_shape'][0]))
-                        #     input_shape.append(self.topo.nodes[r]['input_shape'][0])
                         shape_dict = {}
                         for i, shape in enumerate(input_shape):
-                            shape_dict['input.{}'.format(i)] = shape
+                            shape_dict['input.{}'.format(i)] = standlize_shape(shape)
                         path = osp.join(target_model_path, str(number))
                         number += 1
                         if not osp.exists(path):
@@ -655,23 +638,23 @@ if __name__ == '__main__':
     # model = ResNet(Bottleneck, [3, 8, 36, 3])
     # model = DenseNet(32, (6, 12, 48, 32), 64)
     # model = Inception3()
-    model = get_vgg('E', False)
-    model.eval()
-    input_size = (1, 3, 224, 224)
-    ms = ModelSet(model, input_size, unit=[wrapper])
-    total_ops, total_params = profile(model, (torch.randn(input_size),), verbose=False)
-    print("%s | %.3f MB | %.3fG GFLOPs" % ('model', float(total_params * 4. / (1024 ** 2.)), total_ops / (1000 ** 3)))
-    ms.run()
-    with open('graph/vgg19.o', 'wb') as f:
-        pickle.dump(ms, f)
+    # model = get_vgg('E', False)
+    # model.eval()
+    # input_size = (1, 3, 224, 224)
+    # ms = ModelSet(model, input_size, unit=[wrapper])
+    # total_ops, total_params = profile(model, (torch.randn(input_size),), verbose=False)
+    # print("%s | %.3f MB | %.3fG GFLOPs" % ('model', float(total_params * 4. / (1024 ** 2.)), total_ops / (1000 ** 3)))
+    # ms.run()
+    # with open('graph/vgg19.o', 'wb') as f:
+    #     pickle.dump(ms, f)
 
     # look up for an old partition
-    # with open('/home/lifabing/sgx/best-partion/graph/resnet152.o', 'rb') as f:
-    #     ms = pickle.load(f)
-    #
-    #     # ms.save_graph_json('model_graph.json')
-    #     ms.generate_dnn_partition('/home/lifabing/sgx/best-partion/dnn-partion/resnet152.json',
-    #                               '/home/lifabing/sgx/best-partion/dnn-partion/resnet152/')
+    with open('/home/lifabing/sgx/best-partion/graph/vgg19.o', 'rb') as f:
+        ms = pickle.load(f)
+
+        ms.save_graph_json('model_graph.json')
+        # ms.generate_dnn_partition('/home/lifabing/sgx/best-partion/dnn-partion/vgg19.json',
+        #                           '/home/lifabing/sgx/best-partion/dnn-partion/vgg19/')
     # ms.partition()
     # ms.generate_pipeline_model()
     # ms.generate_model()
