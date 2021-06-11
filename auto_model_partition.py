@@ -155,6 +155,7 @@ class ModelSet:
         self.graph_path = graph_path
         self.topo = None
         self.checkpoints = None
+        self.batch_size = 16
         # self._generate_topo()
 
     def _generate_topo(self):
@@ -457,7 +458,10 @@ class ModelSet:
         #     print(func[-1])
 
     def save_graph_json(self, filename='model_graph.json'):
-        topo = self.topo.remove_node(-1)
+        try:
+            topo = self.topo.remove_node(-1)
+        except:
+            pass
         with open(filename, 'w') as f:
             maxSizePerFPGA = 47185920
             maxFPGAs = 50
@@ -470,7 +474,7 @@ class ModelSet:
                           size=int(self.topo.nodes[n]['params'] * 1024 * 1024)) for n in self.topo.nodes() if n > -1]
             edges = [dict(sourceId=u,
                           destId=v,
-                          cost=size2memory(self.topo.nodes[u]['output_shape'])) for u, v in self.topo.edges() if u > -1]
+                          cost=self.batch_size * 2 * size2memory(self.topo.nodes[u]['output_shape'])) for u, v in self.topo.edges() if u > -1]
             json.dump(dict(maxSizePerFPGA=maxSizePerFPGA,
                            maxFPGAs=maxFPGAs,
                            maxCPUs=maxCPUs,
@@ -649,9 +653,10 @@ if __name__ == '__main__':
     #     pickle.dump(ms, f)
 
     # look up for an old partition
-    with open('/home/lifabing/sgx/best-partion/graph/vgg19.o', 'rb') as f:
+    model_name = 'Inception3'
+    with open('/home/lifabing/sgx/best-partion/graph/{}.o'.format(model_name), 'rb') as f:
         ms = pickle.load(f)
-
+        ms.batch_size = 16
         ms.save_graph_json('model_graph.json')
         # ms.generate_dnn_partition('/home/lifabing/sgx/best-partion/dnn-partion/vgg19.json',
         #                           '/home/lifabing/sgx/best-partion/dnn-partion/vgg19/')
