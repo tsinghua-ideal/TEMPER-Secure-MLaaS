@@ -41,7 +41,7 @@ def getNearPartition(index):
 
 
 def _torch2onnx(torch_model, input_tensor):
-    torch.onnx.export(torch_model, input_tensor, "temp.onnx", verbose=True, input_names=['input'],
+    torch.onnx.export(torch_model, input_tensor, "temp.onnx", verbose=False, input_names=['input'],
                       output_names=['output'])
 
 
@@ -141,7 +141,7 @@ class ModelSet:
         :param blocks_params: A list of set of (model, input shape, output shape, parameter size, latency_origin,
             latency_step, latency_before, latency_after). Default: null        """
         if unit is None:
-            unit = [conv_block, separable_conv_block, BasicBlock, Bottleneck, vgg_classifier]
+            unit = [conv_block, separable_conv_block, BasicBlock, Bottleneck, vgg_classifier, Classifier]
         if blocks_params is None:
             blocks_params = []
         self.unit = unit
@@ -263,9 +263,10 @@ class ModelSet:
             min_func = 9999
             partition_point = -1
             for j in range(0, i+1):
-                trans = 20 * size2memory(self.blocks_params[j][1]) if j > 0 else 0
+                # trans = 20 * size2memory(self.blocks_params[j][1]) if j > 0 else 0
                 params = params_table[j][i]
                 loading = -5.335e-13 * params ** 3 + 1.213e-08 * params ** 2 + 0.0006457 ** params + 1.56 if j > 0 else 0
+                trans = 999
                 if func[j] + latency[j][i] + min(trans, loading) < min_func:
                     min_func = func[j] + latency[j][i] + min(trans, loading)
                     point_type = 1 if trans > loading else 2
@@ -282,11 +283,54 @@ class ModelSet:
             print(l)
         print(func[-1])
 
+    # def params_partition(self, build_dir='model/'):
+    #     size = 0
+    #     for i in range(len(self.blocks_params)):
+    #         layer, shape, _, params = self.blocks_params[i]
+    #         size += size2memory(shape)
+    #         size += params
+    #         if size > 85:
+    #             print('partition point: ', i)
+    #             break
+
     def generate_block_model(self, build_dir='model/'):
         for idx, bp in enumerate(self.blocks_params):
             model = bp[0]
             input_size = bp[1]
+            print(idx, input_size)
             _torch2onnx(model, torch.rand(input_size))
+            path = osp.join(build_dir, str(idx))
+            if not osp.exists(path):
+                os.makedirs(path)
+            _onnx2tvm(torch.rand(input_size), build_dir=path)
+
+    def generate_vessels_model(self, build_dir='model/'):
+        model_set = []
+        input_size = None
+        total_params = 0
+        idx = 0
+        for _, bp in enumerate(self.blocks_params):
+            if len(model_set) == 0:
+                input_size = bp[1]
+                model_set.append(bp[0])
+                total_params = size2memory(bp[1]) + bp[3]
+            else:
+                if size2memory(bp[1]) + bp[3] + total_params > 45:
+                    print(idx, input_size)
+                    _torch2onnx(nn.Sequential(*model_set), torch.rand(input_size))
+                    path = osp.join(build_dir, str(idx))
+                    if not osp.exists(path):
+                        os.makedirs(path)
+                    _onnx2tvm(torch.rand(input_size), build_dir=path)
+                    idx += 1
+                    input_size = bp[1]
+                    model_set = [bp[0]]
+                else:
+                    model_set.append(bp[0])
+                total_params += size2memory(bp[1]) + bp[3]
+        if len(model_set) > 0:
+            print(idx, input_size)
+            _torch2onnx(nn.Sequential(*model_set), torch.rand(input_size))
             path = osp.join(build_dir, str(idx))
             if not osp.exists(path):
                 os.makedirs(path)
@@ -305,11 +349,12 @@ class ModelSet:
             for i in range(index_new+2, index_old+1):
                 model = nn.Sequential(model, self.blocks_params[i][0])
             modelset.append((model, input_size))
+            print(input_size)
             index_old = index_new
             # print(index_new)
-        idx = 0
+        idx = 1
         for (model, input_size) in reversed(modelset):
-            path = osp.join(build_dir, 'part' + str(idx))
+            path = osp.join(build_dir, str(idx))
             if not osp.exists(path):
                 os.makedirs(path)
             _torch2onnx(model, torch.rand(input_size))
@@ -368,10 +413,10 @@ if __name__ == '__main__':
     #     pickle.dump(ms, f)
 
     # look up for an old partition
-    with open('/home/lifabing/sgx/best-partion/modelset/resnet50-dp.o', 'rb') as f:
+    with open('/home/lifabing/sgx/Secure-MLaaS/vgg16-dp-mul.o', 'rb') as f:
         ms = pickle.load(f)
         ms.partition()
-        ms.generate_model()
+        ms.generate_model('/home/lifabing/sgx/lasagna/sgx/lib/vgg16')
         # ms.generate_block_model('/home/lifabing/sgx/re-implementation/vessels/model/resenet18')
     #     # big = 0
     #     # for ipt in ms.blocks_params:

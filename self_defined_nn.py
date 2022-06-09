@@ -739,7 +739,7 @@ class vgg_pool(nn.Module):
 class vgg_classifier(nn.Module):
     def __init__(self, num_classes=1000):
         super(vgg_classifier, self).__init__()
-        self.avgpool = nn.AdaptiveMaxPool2d((7, 7))
+        self.avgpool = nn.AdaptiveAvgPool2d((7, 7))
         self.classifier = nn.Sequential(
             nn.Linear(512 * 7 * 7, 4096),
             nn.ReLU(True),
@@ -762,13 +762,13 @@ class VGG(nn.Module):
     def __init__(self, features, num_classes=1000, init_weights=True):
         super(VGG, self).__init__()
         self.features = features
-        # self.classifier = vgg_classifier(num_classes)
+        self.classifier = vgg_classifier(num_classes)
         if init_weights:
             self._initialize_weights()
 
     def forward(self, x):
         x = self.features(x)
-        # x = self.classifier(x)
+        x = self.classifier(x)
         return x
 
     def _initialize_weights(self):
@@ -796,10 +796,10 @@ def make_layers(cfg, batch_norm=False):
             # conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=1)
             if batch_norm:
                 # layers += [conv2d, nn.BatchNorm2d(v), nn.ReLU(inplace=True)]
-                layers += [conv_block(in_channels, v, kernel_size=3, stride=2, padding=1)]
+                layers += [conv_block(in_channels, v, kernel_size=3, stride=1, padding=1)]
             else:
                 # layers += [conv2d, nn.ReLU(inplace=True)]
-                layers += [conv_block(in_channels, v, kernel_size=3, stride=2, padding=1, bn_flag=False)]
+                layers += [conv_block(in_channels, v, kernel_size=3, stride=1, padding=1, bn_flag=False)]
             in_channels = v
     return nn.Sequential(*layers)
 
@@ -809,7 +809,6 @@ cfgs = {
     'D': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'M', 512, 512, 512, 'M', 512, 512, 512, 'M'],
     'E': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 256, 'M', 512, 512, 512, 512, 'M', 512, 512, 512, 512, 'M'],
 }
-
 
 def get_vgg(cfg, batch_norm, **kwargs):
     kwargs['init_weights'] = True
