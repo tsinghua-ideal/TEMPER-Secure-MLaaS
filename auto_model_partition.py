@@ -58,7 +58,7 @@ def _onnx2tvm(input_tensor, onnx_model='temp.onnx', build_dir='./'):
     input_name = 'input'
     shape_dict = {input_name: input_tensor.shape}
     mod, params = relay.frontend.from_onnx(onnx_model, shape_dict)
-    with relay.build_config(opt_level=4):
+    with relay.build_config(opt_level=3):
         graph, lib, params = relay.build_module.build(
             mod, target=target, params=params)
 
@@ -99,6 +99,8 @@ def _calculate_latency(input_size, heap_size=0x40):
                          executable="/bin/bash", timeout=500)
     while ret.stdout.startswith('Attaching debugger'):
         heap_size += 4
+        if heap_size > 50:
+            heap_size += 200
         ret = subprocess.run('source /home/lifabing/sgx/best-partion/inference/src/sgx-infer.sh ' + input_size + ' ' +
                              str(heap_size), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                              encoding="utf-8",
@@ -184,6 +186,20 @@ class ModelSet:
                 #     _, total_params = profile(layer, (input_tensor,), verbose=False)
                 #     bp.append((layer, input_tensor.shape, float(total_params * 4. / (1024 ** 2.))))
                 #     input_tensor = layer(input_tensor)
+                # if isinstance(layer, nn.Embedding):
+                #     input_tensor = torch.LongTensor(input_tensor.detach().numpy())
+                #     _, total_params = profile(layer, (input_tensor,), verbose=False)
+                #     input_shape = input_tensor.shape
+                #     input_tensor = layer(input_tensor)
+                #     bp.append((layer, input_shape, input_tensor.shape, float(total_params * 4. / (1024 ** 2.))))
+                #     continue
+                # if isinstance(layer, nn.LSTM):
+                #     input_tensor = torch.LongTensor(input_tensor.numpy())
+                #     _, total_params = profile(layer, (input_tensor,), verbose=False)
+                #     input_shape = input_tensor.shape
+                #     input_tensor, _ = layer(input_tensor)
+                #     bp.append((layer, input_shape, input_tensor.shape, float(total_params * 4. / (1024 ** 2.))))
+                #     continue
                 if isinstance(layer, block):
                     _, total_params = profile(layer, (input_tensor,), verbose=False)
                     input_shape = input_tensor.shape
@@ -263,24 +279,26 @@ class ModelSet:
             min_func = 9999
             partition_point = -1
             for j in range(0, i+1):
-                # trans = 20 * size2memory(self.blocks_params[j][1]) if j > 0 else 0
+                trans = 15 * size2memory(self.blocks_params[j][1]) if j > 0 else 0
                 params = params_table[j][i]
-                loading = -5.335e-13 * params ** 3 + 1.213e-08 * params ** 2 + 0.0006457 ** params + 1.56 if j > 0 else 0
-                trans = 999
+                loading = -0.0004522 * params ** 3 + 0.1028 * params ** 2 + 0.2135 ** params + 3.148 if j > 0 else 0
+                loading = 999
+                # trans = 999
                 if func[j] + latency[j][i] + min(trans, loading) < min_func:
                     min_func = func[j] + latency[j][i] + min(trans, loading)
                     point_type = 1 if trans > loading else 2
                     partition_point = j
+                    print(trans)
             func[i+1] = min_func
-            print('partition point: ', partition_point)
+            print('n={} partition point:{} partition type:{}'.format(i, partition_point, point_type))
             partition_flag[i][partition_point] = point_type
         self.strategy = partition_flag
         partition_flag = np.array(partition_flag)
         latency = np.array(latency)
         l = 0
         for i in range(0, layers_n):
-            l += self.blocks_params[i][5]
-            print(l)
+            l += self.blocks_params[i][4]
+        print(l)
         print(func[-1])
 
     # def params_partition(self, build_dir='model/'):
@@ -352,16 +370,18 @@ class ModelSet:
             print(input_size)
             index_old = index_new
             # print(index_new)
-        idx = 1
+        idx = 0
+        trans = 0
         for (model, input_size) in reversed(modelset):
             path = osp.join(build_dir, str(idx))
             if not osp.exists(path):
                 os.makedirs(path)
+            trans += 15 * size2memory(input_size)
             _torch2onnx(model, torch.rand(input_size))
             _onnx2tvm(torch.rand(input_size), build_dir=path)
             print('Writing model into ' + path)
             idx += 1
-
+        print('transmission latency', trans)
             # _onnx2tvm(torch.rand(input_size), build_dir='./')
             # print('Block latency: ', _calculate_latency(str(input_size[0]) + '/' + str(input_size[1]) + '/' +
             #                                             str(input_size[2]) + '/' + str(input_size[3])))
@@ -390,39 +410,71 @@ if __name__ == '__main__':
     #     # for x in layers_params:
     #     #     layer, params = x
     #     print(layers_params)
-    # import torchvision.models as models
 
     # do a new partition
     # model = mobilenet(1000)
-    # # model = ResNet18(1000)
-    # # model = ResNet1(BasicBlock, 10)
-    # # model = nn.Sequential(mobilenet1(), mobilenet2(), mobilenet3())
-    # # import self_defined_nn
-    # # model = self_defined_nn.get_vgg('E', False)
-    # # import torchvision.models as models
-    # # model = models.resnet50(pretrained=False)
-    # # model = ResNet(Bottleneck, [3, 4, 6, 3])
-    # # input_size = (1, 3, 224, 224)
-    # # _torch2onnx(model, torch.rand(input_size))
-    # # _onnx2tvm(torch.rand(input_size), build_dir='./')
-    # # print('Block latency: ', _calculate_latency(str(input_size[0]) + '/' + str(input_size[1]) + '/' +
-    # #                                             str(input_size[2]) + '/' + str(input_size[3]), 0x30))
-    # ms = ModelSet(model, (1, 3, 224, 224))
-    # ms.run()
-    # with open('modelset-dp.o', 'wb') as f:
-    #     pickle.dump(ms, f)
+    # # # model = ResNet18(1000)
+    # # # model = ResNet1(BasicBlock, 10)
+    # # # model = nn.Sequential(mobilenet1(), mobilenet2(), mobilenet3())
+    # import self_defined_nn
+    model = self_defined_nn.get_vgg('E', False)
+    # import torchvision.models as models
+    # # model = models.vgg16(pretrained=False)
+    # _, total_params = profile(model, (torch.rand((1, 3, 224, 224)),), verbose=False)
+    # print("%s | %.3f MB" % ('model', float(total_params * 4. / (1024 ** 2.))))
+    # total_ops, total_params = profile(model, (torch.randn((1, 3, 224, 224)),), verbose=False)
+    # print("%s | %.3f MB | %.3fG GFLOPs" % ('model', float(total_params * 4. / (1024 ** 2.)), total_ops / (1000 ** 3)))
+    # import torchvision.models as models
+    # model = models.segmentation.DeepLabV3(pretrained=False)
+    # from pytorch_transformers import GPT2Tokenizer, GPT2Model
+    # tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+    # model = GPT2Model.from_pretrained('gpt2')
+    # input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute")).unsqueeze(0)  # Batch size 1
+    # outputs = model(input_ids)
+    # last_hidden_states = outputs[0]
+    # with open('bert.o', 'wb') as f:
+    #     pickle.dump(model, f)
+    # densenet169
+    # model = DenseNet(32, (6, 12, 32, 32), 69)
+    # densenet201
+    # model = DenseNet(32, (6, 12, 48, 32), 64)
+    # inception_v3
+
+    # gnmt
+    # from sample import gnmt, LSTMTagger
+    # model = gnmt(10, hidden_size=10, num_layers=4, dropout=0.2)
+    # # model = LSTMTagger(6, 6, 9, 3)
+    # # input_size = (1, 1000, 1000)
+    # # _torch2onnx(model, torch.LongTensor(torch.randint(1, 10, size=(1, 1024))))
+    # # _onnx2tvm(torch.LongTensor(torch.randint(1, 10, size=(1, 1024))), build_dir='./')
+    # # print('Block latency: ', _calculate_latency(str(input_size[0]) + '/' + str(input_size[1]), 0x400))
+    # # _, total_params = profile(model, (torch.LongTensor(torch.randint(1, 10, size=(1, 1024))),), verbose=False)
+    # # model = ResNet(Bottleneck, [3, 30, 48, 8])
+    # input_size = (1, 3, 224, 224)
+    # _torch2onnx(model, torch.randn((1, 3, 224, 224)))
+    # _onnx2tvm(torch.randn((1, 3, 224, 224)), build_dir='./')
+    # print('Block latency: ', _calculate_latency(str(input_size[0]) + '/' + str(input_size[1]) + '/' +
+    #                                             str(input_size[2]) + '/' + str(input_size[3]), 0x30))
+    # # ms = ModelSet(model, (1, 3, 224, 224), unit=[DenseBlock, Transition, conv_block, Dense_Classifier])
+    # ms = ModelSet(model, (1, 1024), unit=[nn.LSTM, nn.Embedding, nn.Linear, nn.Dropout])
+    ms = ModelSet(model, (1, 3, 224, 224), unit=[conv_block, vgg_classifier, nn.MaxPool2d])
+    ms.run()
+    with open('vgg19-dp-mul.o', 'wb') as f:
+        pickle.dump(ms, f)
 
     # look up for an old partition
-    with open('/home/lifabing/sgx/Secure-MLaaS/vgg16-dp-mul.o', 'rb') as f:
-        ms = pickle.load(f)
-        ms.partition()
-        ms.generate_model('/home/lifabing/sgx/lasagna/sgx/lib/vgg16')
-        # ms.generate_block_model('/home/lifabing/sgx/re-implementation/vessels/model/resenet18')
-    #     # big = 0
-    #     # for ipt in ms.blocks_params:
-    #     #     if big < size2memory(ipt[1]):
-    #     #         big = size2memory(ipt[1])
-    #     # print(big)
+    # with open('/home/lifabing/sgx/best-partion/vgg16-dp-mul.o', 'rb') as f:
+    #     ms = pickle.load(f)
+    #     ms.partition()
+    #     # ms.generate_model()
+    #     path = '/home/lifabing/sgx/re-implementation/vessels/model/vgg16'
+    #     # path = '/home/lifabing/sgx/cluster-inference/model/vgg16'
+    #     ms.generate_model(path)
+    #     big = 0
+    #     for ipt in ms.blocks_params:
+    #         if big < size2memory(ipt[1]):
+    #             big = size2memory(ipt[1])
+    #     print(big)
     #     # ms.expansion = 12
     #     s = []
     #     for i in ms.strategy:
