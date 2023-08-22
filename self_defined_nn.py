@@ -1097,7 +1097,7 @@ class Inception3(nn.Module):
         super(Inception3, self).__init__()
         if inception_blocks is None:
             inception_blocks = [
-                BasicConv2d, InceptionA, InceptionB, InceptionC,
+                FirstBasicConv2d, InceptionA, InceptionB, InceptionC,
                 InceptionD, InceptionE, InceptionAux
             ]
         assert len(inception_blocks) == 7
@@ -1129,7 +1129,10 @@ class Inception3(nn.Module):
         self.Mixed_7a = inception_d(768)
         self.Mixed_7b = inception_e(1280)
         self.Mixed_7c = inception_e(2048)
-        self.fc = nn.Linear(2048, num_classes)
+        self.pool1 = inception_pool()
+        self.pool2 = inception_pool()
+        self.classifier = inception_classifier(1000)
+        # self.fc = nn.Linear(2048, num_classes)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
@@ -1160,13 +1163,13 @@ class Inception3(nn.Module):
         # N x 32 x 147 x 147
         x = self.Conv2d_2b_3x3(x)
         # N x 64 x 147 x 147
-        x = F.max_pool2d(x, kernel_size=3, stride=2)
+        x = self.pool1(x)
         # N x 64 x 73 x 73
         x = self.Conv2d_3b_1x1(x)
         # N x 80 x 73 x 73
         x = self.Conv2d_4a_3x3(x)
         # N x 192 x 71 x 71
-        x = F.max_pool2d(x, kernel_size=3, stride=2)
+        x = self.pool2(x)
         # N x 192 x 35 x 35
         x = self.Mixed_5b(x)
         # N x 256 x 35 x 35
@@ -1197,13 +1200,13 @@ class Inception3(nn.Module):
         x = self.Mixed_7c(x)
         # N x 2048 x 8 x 8
         # Adaptive average pooling
-        x = F.adaptive_avg_pool2d(x, (1, 1))
+        # x = F.adaptive_avg_pool2d(x, (1, 1))
         # N x 2048 x 1 x 1
-        x = F.dropout(x, training=self.training)
+        # x = F.dropout(x, training=self.training)
         # N x 2048 x 1 x 1
-        x = torch.flatten(x, 1)
+        # x = torch.flatten(x, 1)
         # N x 2048
-        x = self.fc(x)
+        x = self.classifier(x)
         # N x 1000 (num_classes)
         return x, aux
 
@@ -1218,6 +1221,35 @@ class Inception3(nn.Module):
         x, aux = self._forward(x)
         # aux_defined = self.training and self.aux_logits
         return self.eager_outputs(x, aux)
+
+
+class inception_pool(nn.Module):
+    def __init__(self):
+        super(inception_pool, self).__init__()
+        self.pool = nn.MaxPool2d(kernel_size=3, stride=2)
+
+    def forward(self, x):
+        x = self.pool(x)
+        return x
+
+
+class inception_classifier(nn.Module):
+    def __init__(self, num_classes):
+        super(inception_classifier, self).__init__()
+        self.pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.dropout = nn.Dropout()
+        self.fc = nn.Linear(2048, num_classes)
+
+    def forward(self, x):
+        x = self.pool(x)
+        # N x 2048 x 1 x 1
+        x = self.dropout(x)
+        # N x 2048 x 1 x 1
+        x = torch.flatten(x, 1)
+        # N x 2048
+        x = self.fc(x)
+        # N x 1000 (num_classes)
+        return x
 
 
 class InceptionA(nn.Module):
@@ -1454,6 +1486,18 @@ class BasicConv2d(nn.Module):
         x = self.bn(x)
         return F.relu(x, inplace=True)
 
+
+class FirstBasicConv2d(nn.Module):
+
+    def __init__(self, in_channels, out_channels, **kwargs):
+        super(FirstBasicConv2d, self).__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
+        self.bn = nn.BatchNorm2d(out_channels, eps=0.001)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.bn(x)
+        return F.relu(x, inplace=True)
 # if __name__ == '__main__':
 #     model = Darknet53()
 #     print(model)
