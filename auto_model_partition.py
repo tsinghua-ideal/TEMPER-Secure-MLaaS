@@ -14,6 +14,7 @@ import os
 from os import path as osp
 import subprocess
 import pickle
+import argparse
 
 
 def isRightChild(index):
@@ -392,7 +393,9 @@ class ModelSet:
         :return: An generator of strategies of partitions
         """
         if not self.blocks_params:
+            print('stat layer params')
             self._stat_layer_params()
+            print('get block latency')
             import time
             start = time.time()
             self._get_block_latency()
@@ -403,6 +406,46 @@ class ModelSet:
 
 
 if __name__ == '__main__':
+    args = argparse.ArgumentParser()
+    # receive model name
+    args.add_argument('--model', type=str, default='resnet18')
+    # receive input size
+    args.add_argument('--input_size', type=str, default='1,3,224,224')
+    # generated model path
+    args.add_argument('--build_dir', type=str, default='model/')
+    
+    args = args.parse_args()
+    if args.model == 'resnet18':
+        model = ResNet(BasicBlock, [2, 2, 2, 2])
+        ms = ModelSet(model, (1, 3, 224, 224), unit=[conv_block, Classifier, BasicBlock])
+    elif args.model == 'resnet50':
+        model = ResNet(Bottleneck, [3, 4, 6, 3])
+        ms = ModelSet(model, (1, 3, 224, 224), unit=[conv_block, Classifier, Bottleneck])
+    elif args.model == 'resnet152':
+        model = ResNet(Bottleneck, [3, 8, 36, 3])
+        ms = ModelSet(model, (1, 3, 224, 224), unit=[conv_block, Classifier, Bottleneck])
+    elif args.model == 'vgg19':
+        model = get_vgg('E', False)
+        ms = ModelSet(model, (1, 3, 224, 224), unit=[conv_block, vgg_classifier, nn.MaxPool2d])
+    elif args.model == 'densenet169':
+        model = DenseNet(32, (6, 12, 32, 32), 69)
+        ms = ModelSet(model, (1, 3, 224, 224), unit=[DenseBlock, Transition, conv_block, Dense_Classifier])
+    # densenet201
+    elif args.model == 'densenet201':
+        model = DenseNet(32, (6, 12, 48, 32), 64)
+        ms = ModelSet(model, (1, 3, 224, 224), unit=[DenseBlock, Transition, conv_block, Dense_Classifier])
+    elif args.model == 'inception_v3':
+        model = Inception3(1000, aux_logits=False)
+        ms = ModelSet(model, (1, 3, 224, 224), unit=[FirstBasicConv2d, InceptionA, InceptionB, InceptionC,
+                InceptionD, InceptionE, InceptionAux])
+    else:
+        raise ValueError('Model not found')
+    ms = ModelSet(model, (1, 3, 224, 224), unit=[conv_block, vgg_classifier, nn.MaxPool2d])
+    ms.run()
+    ms.generate_model(args.build_dir)
+    with open('{}-dp-mul.o'.format(args.model), 'wb') as f:
+        pickle.dump(ms, f)
+        
     #     shape = [(1, 3, 224, 224), (1, 3, 150, 150), (1, 32, 75, 75)]
     #     input_tensor = torch.randn(shape[1])
     #     # x = torch2onnx(input_tensor, model)
@@ -417,7 +460,7 @@ if __name__ == '__main__':
     # # # model = ResNet1(BasicBlock, 10)
     # # # model = nn.Sequential(mobilenet1(), mobilenet2(), mobilenet3())
     # import self_defined_nn
-    model = self_defined_nn.get_vgg('E', False)
+    # model = self_defined_nn.get_vgg('E', False)
     # import torchvision.models as models
     # # model = models.vgg16(pretrained=False)
     # _, total_params = profile(model, (torch.rand((1, 3, 224, 224)),), verbose=False)
@@ -457,10 +500,10 @@ if __name__ == '__main__':
     #                                             str(input_size[2]) + '/' + str(input_size[3]), 0x30))
     # # ms = ModelSet(model, (1, 3, 224, 224), unit=[DenseBlock, Transition, conv_block, Dense_Classifier])
     # ms = ModelSet(model, (1, 1024), unit=[nn.LSTM, nn.Embedding, nn.Linear, nn.Dropout])
-    ms = ModelSet(model, (1, 3, 224, 224), unit=[conv_block, vgg_classifier, nn.MaxPool2d])
-    ms.run()
-    with open('vgg19-dp-mul.o', 'wb') as f:
-        pickle.dump(ms, f)
+    # ms = ModelSet(model, (1, 3, 224, 224), unit=[conv_block, vgg_classifier, nn.MaxPool2d])
+    # ms.run()
+    # with open('vgg19-dp-mul.o', 'wb') as f:
+    #     pickle.dump(ms, f)
 
     # look up for an old partition
     # with open('/home/lifabing/sgx/best-partion/vgg16-dp-mul.o', 'rb') as f:
