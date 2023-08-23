@@ -415,6 +415,7 @@ if __name__ == '__main__':
     args.add_argument('--build_dir', type=str, default='model/')
     
     args = args.parse_args()
+    
     if args.model == 'resnet18':
         model = ResNet(BasicBlock, [2, 2, 2, 2])
         ms = ModelSet(model, (1, 3, 224, 224), unit=[conv_block, Classifier, BasicBlock])
@@ -430,7 +431,6 @@ if __name__ == '__main__':
     elif args.model == 'densenet169':
         model = DenseNet(32, (6, 12, 32, 32), 69)
         ms = ModelSet(model, (1, 3, 224, 224), unit=[DenseBlock, Transition, conv_block, Dense_Classifier])
-    # densenet201
     elif args.model == 'densenet201':
         model = DenseNet(32, (6, 12, 48, 32), 64)
         ms = ModelSet(model, (1, 3, 224, 224), unit=[DenseBlock, Transition, conv_block, Dense_Classifier])

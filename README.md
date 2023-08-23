@@ -20,10 +20,12 @@ Note that the TVM packages should be installed by compiled packages.
 
 2. Install TVM
 
-Install TVM v0.7 from https://github.com/apache/incubator-tvm.git .
+Install TVM v0.7 from https://github.com/apache/incubator-tvm.git . You can use [TVM Docs][tvm_docs] to install TVM.
+[tvm_docs]: https://tvm.apache.org/docs/install/index.html
+
 After the compilation, install the python packages.
 
-3. Prepare the Rust environment
+1. Prepare the Rust environment
 
 Open a terminal and enter the following command:
 ```
@@ -44,9 +46,22 @@ Switch to the nightly version of cargo (nightly-2021-04-15-x86_64-unknown-linux-
 
 4. Install Fortanix
 
-Follow the instructions in https://edp.fortanix.com/docs/installation/guide/ to add the Fortanix EDP target for Rust SGX.
+Fortanix is a target for Intel SGX which automatically compiles the code into SGX SDK. Install it by its official [doc][doc]. Note that Intel SGX SDK is necessary here.
+
+[doc]: https://edp.fortanix.com/docs/installation/guide/
 ## Evaluation
 
+To run the model partition, you should run `python auto_model_partition.py --model <your_model> --input_size <data_size> --build_dir <path>`. The model will be partitioned into several TVM submodels and the submodels will be compiled into libraries and parameters. The enclave libraries will be stored in the `build_dir` directory.
+
+To run the model inference, you should run the following commands:
+```
+cd cluster-inference
+source environment.sh
+./clean.sh
+./build.sh
+python slave_generator.py <the path of generated models> <the path of target instance dir>
+
+```
 
 ## Brute Force 
 Brute Force refers to a brute force searching algorithm to find best model partition.
