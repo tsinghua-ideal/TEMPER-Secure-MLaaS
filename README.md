@@ -48,6 +48,8 @@ Switch to the nightly version of cargo (nightly-2021-04-15-x86_64-unknown-linux-
 
 Fortanix is a target for Intel SGX which automatically compiles the code into SGX SDK. Install it by its official [doc][doc]. Note that Intel SGX SDK is necessary here.
 
+Then run `rustup component add llvm-tools-preview` to get llvm-ar and llvm-objcopy
+
 [doc]: https://edp.fortanix.com/docs/installation/guide/
 ## Evaluation
 
@@ -61,11 +63,28 @@ source environment.sh
 ./build.sh
 python slave_generator.py <the path of generated models> <the path of target instance dir>
 
+
+# Build client
+cd attest-client && cargo run --target x86_64-unknown-linux-gnu --features verbose --example attest_client -- -e 127.0.0.1:7710 -s 127.0.0.1:1234 -n 0
+
+# Build SP
+cd ra-sp && cargo run --target x86_64-unknown-linux-gnu --example tvm_user  -- -e 127.0.0.1:22000 -n 2
+
+# Build Scheduler
+cd scheduler;cargo build --target x86_64-fortanix-unknown-sgx --example scheduler
+
+# Build and sign enclave
+
+sgx-task-enclave is the template of worker enclaves. To generate the configurations and the codes of worker enclaves on demand, we set up a worker generator. The worker generator will generate the enclave code and the enclave library.
+The enclave library will be signed by the following command:
+python worker_generator.py <model_path> <target_dir>
+<!-- (cd sgx-task-enclave && cargo build --target x86_64-fortanix-unknown-sgx ) && \
+ftxsgx-elf2sgxs $TARGET --heap-size 0x10000000 --stack-size 0x800000 --threads 8 \
+    --debug --output $TARGET_SGX && \
+#sgxs-sign --key $KEY $TARGET_SGX $TARGET_DIR/$TARGET_NAME.sig -d --xfrm 7/0 --isvprodid 0 --isvsvn 0
+sgxs-sign --key $KEY $TARGET_SGX $TARGET_SIG -d --xfrm 7/0 --isvprodid 0 --isvsvn 0 -->
+
+
+
 ```
 
-## Brute Force 
-Brute Force refers to a brute force searching algorithm to find best model partition.
-A partition rule is applied, and the best situation of complexity is $O(n)$ while the worst is $O(2^n)$.
-if 
-$Latency_1..(n+1)≤Latency_(1..n)+ Latency_(n+1)$
-, do not partition.
