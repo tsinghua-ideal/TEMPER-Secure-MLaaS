@@ -1,0 +1,9 @@
+{
+    "schedule_address": "127.0.0.1:22000",
+    "client_address": "127.0.0.1:7710",
+    "attestation_address": "127.0.0.1:4240",
+    "sp_address": "127.0.0.1:1310",
+    "model": ["resnet18", "mobilenetv1"],
+    "model_path": "/home/lww/project/02_Project/01-rust/cluster-inference/model/resnet50/3",
+    "input_size": [1,3,224,224]
+}

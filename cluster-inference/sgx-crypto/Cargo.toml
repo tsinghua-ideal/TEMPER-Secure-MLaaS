@@ -1,0 +1,22 @@
+[package]
+name = "sgx-crypto"
+version = "0.1.0"
+authors = ["Natnatee Dokmai <ndokmai@indiana.edu>"]
+edition = "2018"
+
+[features]
+default = []
+
+[dependencies]
+regex = "1.3.3"
+base64 = "0.13.0"
+byteorder = "1.2.1"
+cfg-if = "1.0.0"
+
+[target.'cfg(target_env = "sgx")'.dependencies]
+mbedtls = {path = "/home/lww/project/03_TVM/rust-mbedtls/mbedtls", default-features = false, features = ["no_std_deps", "rdrand", "aesni"]}
+# mbedtls = { git = "https://github.com/grief8/rust-mbedtls.git", default-features = false, features = ["sgx"] }
+
+[target.'cfg(not(target_env = "sgx"))'.dependencies]
+# mbedtls = { git = "https://github.com/fortanix/rust-mbedtls.git" } 
+mbedtls = { path = "/home/lww/project/03_TVM/rust-mbedtls/mbedtls" } 

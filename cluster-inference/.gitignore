@@ -1,0 +1,9 @@
+*target/
+*.lock
+*/Cargo.lock
+*.o
+*.pem
+model.o
+best-partion/
+model/
+.vscode/

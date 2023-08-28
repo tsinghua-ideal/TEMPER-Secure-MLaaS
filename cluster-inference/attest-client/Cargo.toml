@@ -1,0 +1,23 @@
+[package]
+name = "attest-client"
+version = "0.1.0"
+authors = ["Natnatee Dokmai <ndokmai@indiana.edu>"]
+edition = "2018"
+
+[features]
+verbose = []
+default = ["byteorder"]
+
+[dependencies]
+bincode = "1.2.1"
+aesm-client = "0.5.3"
+sgx-isa = "0.3.1"
+ra-common = { path = "../ra-common" }
+sgx-crypto = { path = "../sgx-crypto" }
+byteorder = { version = "1.3.2", optional = true }
+clap = "2.33.0"
+
+[[example]]
+name = "attest_client"
+path = "examples/attest_client.rs"
+test = false 

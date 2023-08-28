@@ -1,0 +1,57 @@
+{
+    "linkable": true,
+    "random_nonce": false,
+    "use_platform_service": false,
+    "spid": "7E0D90F243226C78D6FDD2328A9624E7",
+    "primary_subscription_key": "bc7879b907624dfdabfdbcac67037646",
+    "secondary_subscription_key": "a8a049d90288467ab8e307be1bb12278",
+    "quote_trust_options": [
+        "GROUP_OUT_OF_DATE",
+        "CONFIGURATION_NEEDED"
+    ],
+    "ias_root_cert_pem_path": "examples/data/Intel_SGX_Attestation_RootCA.pem",
+    "listener_address": "localhost:1234",
+    "slaves":[{
+        "id":0,
+        "client_ip":"localhost",
+        "enclave_port": "localhost:1310",
+        "sp_private_key_pem_path": "examples/data/sp-keys/private_key.pem",
+        "sigstruct_path": "../sgx-task-enclave/target/x86_64-fortanix-unknown-sgx/debug/sgx-task-enclave.sig"
+    },{
+        "id":1,
+        "client_ip":"localhost",
+        "enclave_port": "localhost:1311",
+        "sp_private_key_pem_path": "examples/data/sp-keys/private_key.pem",
+        "sigstruct_path": "../sgx-task-enclave/target/x86_64-fortanix-unknown-sgx/debug/sgx-task-enclave.sig"
+    },{
+        "id":2,
+        "client_ip":"localhost",
+        "enclave_port": "localhost:1312",
+        "sp_private_key_pem_path": "examples/data/sp-keys/private_key.pem",
+        "sigstruct_path": "../sgx-task-enclave/target/x86_64-fortanix-unknown-sgx/debug/sgx-task-enclave.sig"
+    },{
+        "id":3,
+        "client_ip":"localhost",
+        "enclave_port": "localhost:1313",
+        "sp_private_key_pem_path": "examples/data/sp-keys/private_key.pem",
+        "sigstruct_path": "../sgx-task-enclave/target/x86_64-fortanix-unknown-sgx/debug/sgx-task-enclave.sig"
+    },{
+        "id":4,
+        "client_ip":"localhost",
+        "enclave_port": "localhost:1314",
+        "sp_private_key_pem_path": "examples/data/sp-keys/private_key.pem",
+        "sigstruct_path": "../sgx-task-enclave/target/x86_64-fortanix-unknown-sgx/debug/sgx-part4.sig"
+    },{
+        "id":253,
+        "client_ip":"localhost",
+        "enclave_port": "localhost:1317",
+        "sp_private_key_pem_path": "examples/data/sp-keys/private_key.pem",
+        "sigstruct_path": "../s2/target/x86_64-fortanix-unknown-sgx/debug/scheduler.sig"
+    },{
+        "id":255,
+        "client_ip":"localhost",
+        "enclave_port": "localhost:7719",
+        "sp_private_key_pem_path": "examples/data/sp-keys/private_key.pem",
+        "sigstruct_path": "../scheduler/target/x86_64-fortanix-unknown-sgx/debug/examples/scheduler.sig"
+    }]
+}

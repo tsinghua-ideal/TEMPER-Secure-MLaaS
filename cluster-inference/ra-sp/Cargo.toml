@@ -1,0 +1,45 @@
+[package]
+name = "ra-sp"
+version = "0.1.0"
+authors = ["Natnatee Dokmai <ndokmai@indiana.edu>"]
+edition = "2018"
+
+[features]
+verbose = []
+
+[dependencies]
+bincode = "1.2.1"
+http = "0.2"
+hyper = {version = "0.14.11",features = ["full"]}
+hyper-tls = "0.5.0"
+hex = "0.4"
+regex = "1.3.3"
+base64 = "0.13.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+percent-encoding = "2.1.0"
+byteorder = "1.3.2"
+tokio = { version = "1.10.0", features = ["full"]}
+sgxs = "0.7.2"
+sgx-isa = "0.3.1"
+aesm-client = "0.5.3"
+sgx-crypto = { path = "../sgx-crypto" }
+ra-common = { path = "../ra-common" }
+http-serde = "1.0.1"
+clap = "2.33.0"
+
+[target.'cfg(target_env = "sgx")'.dependencies]
+mbedtls = {path = "/home/lww/project/03_TVM/rust-mbedtls/mbedtls", default-features = false, features = ["no_std_deps"]}
+
+[target.'cfg(not(target_env = "sgx"))'.dependencies]
+mbedtls = {path = "/home/lww/project/03_TVM/rust-mbedtls/mbedtls"}
+
+[[example]]
+name = "service_provider"
+path = "examples/service_provider.rs"
+test = false
+
+[[example]]
+name = "tvm_user"
+path = "examples/tvm_user.rs"
+test = false
