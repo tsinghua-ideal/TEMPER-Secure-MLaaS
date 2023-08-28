@@ -215,8 +215,8 @@ debug=true'''
 
 def get_address(index, model_path):
     return r'''{
-    "server_address": "172.16.111.170:'''+ str(32100+index) + r'''",
-    "client_address": "172.16.111.236:'''+ str(32100+index+1) + r'''",
+    "server_address": "127.0.0.1:'''+ str(32100+index) + r'''",
+    "client_address": "127.0.0.1:'''+ str(32100+index+1) + r'''",
     "attestation_address": "127.0.0.1:'''+ str(4240+index) + r'''",
     "sp_address": "127.0.0.1:1310",
     "model": ["resnet18", "mobilenetv1"],
