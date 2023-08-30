@@ -14,6 +14,11 @@ For safety concern, we have to build a reliable communication architecture to en
 Run `run.sh` to start the service, or run the following commands step by step.
 
 ```
+
+# Setup environment
+cd cluster-inference
+source environment.sh
+
 PartID=$1
 TARGET_NAME=sgx-task-enclave
 TARGET_DIR=`pwd`/sgx-task-enclave/target/x86_64-fortanix-unknown-sgx/debug
@@ -44,6 +49,11 @@ ftxsgx-runner --signature coresident $TARGET &
 
 # Run SP
 (cd ra-sp && cargo run --target x86_64-unknown-linux-gnu  --example tls-sp   --features "verbose")
+
+# Build Scheduler
+cd scheduler && cargo run \
+--target x86_64-fortanix-unknown-sgx \
+--features verbose
 
 file=full_transition.txt
 for i in {0..50};
