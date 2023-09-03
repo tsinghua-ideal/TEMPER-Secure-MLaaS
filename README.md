@@ -61,7 +61,7 @@ cd cluster-inference
 source environment.sh
 ./clean.sh
 ./build.sh
-pythonworker_generator.py <the path of generated models> <the path of target instance dir>
+python worker_generator.py <the path of generated models> <the path of target instance dir>
 
 
 # Build client
