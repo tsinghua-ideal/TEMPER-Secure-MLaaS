@@ -20,7 +20,7 @@ Note that the TVM packages should be installed by compiled packages.
 
 2. Install TVM
 
-Install TVM v0.7 from https://github.com/apache/incubator-tvm.git . You can use [TVM Docs][tvm_docs] to install TVM.
+Install TVM v0.7 from https://github.com/grief8/tvm.git or https://github.com/apache/incubator-tvm.git . You can use [TVM Docs][tvm_docs] to install TVM.
 [tvm_docs]: https://tvm.apache.org/docs/install/index.html
 
 After the compilation, install the python packages.
