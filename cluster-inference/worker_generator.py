@@ -15,21 +15,9 @@ runner = "ftxsgx-runner-cargo"
 def get_main():
     return r'''extern crate tvm_graph_rt;
 extern crate byteorder;
-extern crate mbedtls;
 
 use std::net::{TcpListener, TcpStream};
 use byteorder::{NetworkEndian, WriteBytesExt};                                                                                              
-use ra_enclave::tls_enclave::attestation;
-use mbedtls::pk::Pk;
-use mbedtls::rng::CtrDrbg;
-use mbedtls::ssl::config::{Endpoint, Preset, Transport};
-use mbedtls::ssl::{Config, Context, Session};
-use mbedtls::x509::Certificate;
-
-#[path = "/home/lww/project/02_Project/01-rust/cluster-inference/support/mod.rs"]
-mod support;
-use support::entropy::entropy_new;
-use support::keys;
 
 use std::{
     convert::TryFrom as _,
@@ -48,7 +36,6 @@ fn main() {
         let config: Value = serde_json::from_str(config).unwrap();
         let client_address = config["client_address"].as_str().unwrap();
         let sp_address = config["sp_address"].as_str().unwrap();
-        // let mut sign_key = attestation(client_address, sp_address, keep_message).unwrap();
         println!("attestation end");
     });
     thread_vec.push(handle);
@@ -62,15 +49,6 @@ fn main() {
     }
     
  }
- 
-pub fn keep_message(session:Session){
-    let mut sess = session;
-    let msg = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque non placerat risus, et lobortis quam. Mauris velit lorem, elementum id neque a, aliquet tempus turpis. Nam eu congue urna, in semper quam. Ut tristique gravida nunc nec feugiat. Proin tincidunt massa a arcu volutpat, sagittis dignissim velit convallis. Cras ac finibus lorem, nec congue felis. Pellentesque fermentum vitae ipsum sed gravida. Nulla consectetur sit amet erat a pellentesque. Donec non velit sem. Sed eu metus felis. Nullam efficitur consequat ante, ut commodo nisi pharetra consequat. Ut accumsan eget ligula laoreet dictum. Maecenas tristique porta convallis. Suspendisse tempor sodales velit, ac luctus urna varius eu. Ut ultrices urna vestibulum vestibulum euismod. Vivamus eu sapien urna.";
-    sess
-        .write_u32::<NetworkEndian>(msg.len() as u32)
-        .unwrap();
-    write!(&mut sess, "{}", msg).unwrap();
-}
 
 pub fn do_tvm(){
     env::set_var("TVM_NUM_THREADS", "6");
@@ -91,35 +69,18 @@ pub fn do_tvm(){
     println!("addr: {}", server_address);
     for stream in listener.incoming() {
         let mut socket = TcpStream::connect(client_address).unwrap();
-        let mut entropyc = entropy_new();
-        let mut rngc = CtrDrbg::new(&mut entropyc, None).unwrap();
-        let mut certc = Certificate::from_pem(keys::PEM_CERT).unwrap();
-        let mut configc = Config::new(Endpoint::Client, Transport::Stream, Preset::Default);
-        configc.set_rng(Some(&mut rngc));
-        configc.set_ca_list(Some(&mut *certc), None);
-        let mut ctxc = Context::new(&configc).unwrap();
-        let mut client_session = ctxc.establish(&mut socket, None).unwrap();
 
         let mut stream = stream.unwrap();
-        let mut entropy = entropy_new();
-        let mut rng = CtrDrbg::new(&mut entropy, None).unwrap();
-        let mut cert = Certificate::from_pem(keys::PEM_CERT).unwrap();
-        let mut key = Pk::from_private_key(keys::PEM_KEY, None).unwrap();
-        let mut config = Config::new(Endpoint::Server, Transport::Stream, Preset::Default);
-        config.set_rng(Some(&mut rng));
-        config.push_cert(&mut *cert, &mut key).unwrap();
-        let mut ctx = Context::new(&config).unwrap();
-        let mut server_session = ctx.establish(&mut stream, None).unwrap();
         println!("server_session connect!");
         loop {
             if let Err(_) =
-                server_session.read(exec.get_input("input").unwrap().data().view().as_mut_slice())
+            stream.read(exec.get_input("input").unwrap().data().view().as_mut_slice())
             {
                 continue;
             }
             let sy_time = SystemTime::now();
             exec.run();
-            client_session.write(exec.get_output(0).unwrap().data().as_slice()).unwrap();
+            socket.write(exec.get_output(0).unwrap().data().as_slice()).unwrap();
             println!("computing time: {:?}", SystemTime::now().duration_since(sy_time).unwrap().as_micros());
         }
     }
@@ -197,20 +158,15 @@ edition = "2018"
 
 [dependencies]
 byteorder = { version = "1.3.2" }
-tvm-graph-rt = { path = "/home/lww/project/03_TVM/tvm/rust/tvm-graph-rt" }
-mbedtls = {path = "/home/lww/project/03_TVM/rust-mbedtls/mbedtls", default-features = false, features = ["no_std_deps"]}
+tvm-graph-rt = { path = "/home/lifabing/sgx/tvm/rust/tvm-graph-rt" }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 bincode = "1.2.1"
-sgx-isa = { version = "0.3.1", features = ["sgxstd"] }
-sgx-crypto = { path = "/home/lww/project/02_Project/01-rust/cluster-inference/sgx-crypto" }
-ra-common = { path = "/home/lww/project/02_Project/01-rust/cluster-inference/ra-common" }
-ra-enclave = { path = "/home/lww/project/02_Project/01-rust/cluster-inference/ra-enclave" }
 
 [package.metadata.fortanix-sgx]
 stack-size=0x20000
 heap-size=0x3000000
-debug=true'''
+debug=false'''
 
 
 def get_address(index, model_path):
@@ -225,31 +181,176 @@ def get_address(index, model_path):
 }'''
 
 
+def get_lock():
+    return r'''
+[[package]]
+name = "platforms"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "feb3b2b1033b8a60b4da6ee470325f887758c95d5320f52f9ce0df055a55940e"'''
+
 def my_mkdirs(path):
     if not os.path.exists(path):
         os.makedirs(path)
+
+
+def get_client_toml():
+    return r'''[package]
+name = "sample"
+version = "0.1.0"
+authors = ["fabing <1349212501@qq.com>"]
+edition = "2018"
+
+[dependencies]
+byteorder = { version = "1.3.2" }
+tvm-graph-rt = { path = "/home/lifabing/sgx/tvm/rust/tvm-graph-rt" }
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+bincode = "1.2.1"
+rand = "0.7"
+
+[package.metadata.fortanix-sgx]
+stack-size=0x20000
+heap-size=0x3000000
+debug=false'''
+
+
+def get_client_main():
+    return r'''extern crate tvm_graph_rt;
+extern crate byteorder;
+extern crate rand;
+
+use std::net::{TcpListener, TcpStream};
+use byteorder::{NetworkEndian, WriteBytesExt};                                                                                              
+use rand::Rng;
+use std::{
+    convert::TryFrom as _,
+    io::{Read as _, Write as _},
+    time::{SystemTime, UNIX_EPOCH},
+    thread, slice,
+    env,
+};
+use serde_json::{Result, Value};
+
+fn main() {
+    let mut thread_vec = vec![];
+    let handle = thread::spawn(move ||{
+        println!("attestation start");
+        let config = include_str!(concat!(env!("PWD"), "/config"));
+        let config: Value = serde_json::from_str(config).unwrap();
+        let client_address = config["client_address"].as_str().unwrap();
+        let sp_address = config["sp_address"].as_str().unwrap();
+        println!("attestation end");
+    });
+    thread_vec.push(handle);
+    let handle = thread::spawn(move ||{
+        do_tvm();
+    });
+    thread_vec.push(handle);
+    for handle in thread_vec {
+        // Wait for the thread to finish. Returns a result.
+        let _ = handle.join().unwrap();
+    }
+    
+ }
+
+pub fn do_tvm(){
+    env::set_var("TVM_NUM_THREADS", "6");
+    let config = include_str!(concat!(env!("PWD"), "/config"));
+    let config: Value = serde_json::from_str(config).unwrap();
+    let server_address = config["server_address"].as_str().unwrap();
+    let client_address = config["client_address"].as_str().unwrap();
+    
+    let shape = (1, 3, 224, 224);
+    let mut rng =rand::thread_rng();
+    let mut ran = vec![];
+    for _i in 0..shape.0*shape.1*shape.2*shape.3{
+        ran.push(rng.gen::<f32>()*256.);
+    }
+    let mut user_data = unsafe{
+        slice::from_raw_parts_mut(ran.as_mut_ptr() as *mut u8, shape.0*shape.1*shape.2*shape.3 * 4)
+    };
+    let listener = TcpListener::bind(server_address).unwrap();
+    println!("addr: {}", server_address);
+    let mut socket = TcpStream::connect(client_address).unwrap();
+    println!("sending ");
+    let mut data: Vec<u8> = vec![0; 30000];
+    let mut buffer: &mut [u8] = data.as_mut_slice();
+    let sy_time = SystemTime::now();
+    socket.write(user_data);
+    for stream in listener.incoming() {
+        let mut stream = stream.unwrap();
+        println!("server_session connect!");
+        loop {
+            if let Err(_) =
+            stream.read(buffer)
+            {
+                continue;
+            }
+            println!("computing time: {:?}", SystemTime::now().duration_since(sy_time).unwrap().as_micros());
+        }
+    }
+ }
+
+'''
+
+
+def get_client_address(index, model_path):
+    return r'''{
+    "server_address": "127.0.0.1:'''+ str(32100+index) + r'''",
+    "client_address": "127.0.0.1:'''+ str(32100) + r'''",
+    "attestation_address": "127.0.0.1:'''+ str(4240+index) + r'''",
+    "sp_address": "127.0.0.1:1310",
+    "model": ["resnet18", "mobilenetv1"],
+    "model_path": "'''+ str(model_path) + r'''",
+    "input_size": [1,3,224,224]
+}'''
 
 
 if __name__ == "__main__":
     model_path = sys.argv[1] if sys.argv[1] else "/home/lww/project/02_Project/01-rust/cluster-inference/model/resnet50"
     num_models = len(os.listdir(model_path))
     target_dir = sys.argv[2] if sys.argv[2] else "/home/lww/project/02_Project/01-rust//"
-    for i in range(num_models):
-        root = os.path.join(target_dir, str(i))
-        cargo = os.path.join(root, '.cargo')
-        src = os.path.join(root, 'src')
-        m_path = os.path.join(model_path, str(i))
-        print(m_path)
-        my_mkdirs(root)
-        my_mkdirs(cargo)
-        my_mkdirs(src)
-        with open(os.path.join(cargo, 'config'), 'w') as config, \
-            open(os.path.join(src, 'main.rs'), 'w') as main, \
-            open(os.path.join(root, 'build.rs'), 'w') as build, \
-            open(os.path.join(root, 'Cargo.toml'), 'w') as toml, \
-            open(os.path.join(root, 'config'), 'w') as address:
-            config.write(get_config())
-            main.write(get_main())
-            build.write(get_build(m_path))
-            toml.write(get_toml())
-            address.write(get_address(i, m_path))
+    for i in range(num_models+1):
+        if i == num_models:
+            root = os.path.join(target_dir, 'client')
+            cargo = os.path.join(root, '.cargo')
+            src = os.path.join(root, 'src')
+            m_path = os.path.join(model_path, str(0))
+            print(m_path)
+            my_mkdirs(root)
+            my_mkdirs(cargo)
+            my_mkdirs(src)
+            with open(os.path.join(cargo, 'config'), 'w') as config, \
+                open(os.path.join(src, 'main.rs'), 'w') as main, \
+                open(os.path.join(root, 'build.rs'), 'w') as build, \
+                open(os.path.join(root, 'Cargo.toml'), 'w') as toml, \
+                open(os.path.join(root, 'Cargo.lock'), 'w') as lock, \
+                open(os.path.join(root, 'config'), 'w') as address:
+                config.write(get_config())
+                main.write(get_client_main())
+                build.write(get_build(m_path))
+                toml.write(get_client_toml())
+                lock.write(get_lock())
+                address.write(get_client_address(i, m_path))
+        else:
+            root = os.path.join(target_dir, str(i))
+            cargo = os.path.join(root, '.cargo')
+            src = os.path.join(root, 'src')
+            m_path = os.path.join(model_path, str(i))
+            print(m_path)
+            my_mkdirs(root)
+            my_mkdirs(cargo)
+            my_mkdirs(src)
+            with open(os.path.join(cargo, 'config'), 'w') as config, \
+                open(os.path.join(src, 'main.rs'), 'w') as main, \
+                open(os.path.join(root, 'build.rs'), 'w') as build, \
+                open(os.path.join(root, 'Cargo.toml'), 'w') as toml, \
+                open(os.path.join(root, 'Cargo.lock'), 'w') as lock, \
+                open(os.path.join(root, 'config'), 'w') as address:
+                config.write(get_config())
+                main.write(get_main())
+                build.write(get_build(m_path))
+                toml.write(get_toml())
+                lock.write(get_lock())
+                address.write(get_address(i, m_path))
