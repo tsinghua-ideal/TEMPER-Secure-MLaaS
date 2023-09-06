@@ -287,7 +287,7 @@ pub fn do_tvm(){
             {
                 continue;
             }
-            println!("computing time: {:?}", SystemTime::now().duration_since(sy_time).unwrap().as_micros());
+            println!("total measured time: {:?}", SystemTime::now().duration_since(sy_time).unwrap().as_micros());
         }
     }
  }
