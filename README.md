@@ -59,32 +59,11 @@ To run the model inference, you should run the following commands:
 ```
 cd cluster-inference
 source environment.sh
-./clean.sh
-./build.sh
+
+# Generate instances
 python worker_generator.py <the path of generated models> <the path of target instance dir>
 
-
-# Build client
-cd attest-client && cargo run --target x86_64-unknown-linux-gnu --features verbose --example attest_client -- -e 127.0.0.1:7710 -s 127.0.0.1:1234 -n 0
-
-# Build SP
-cd ra-sp && cargo run --target x86_64-unknown-linux-gnu --example tvm_user  -- -e 127.0.0.1:22000 -n 2
-
-# Build Scheduler
-cd scheduler;cargo build --target x86_64-fortanix-unknown-sgx --example scheduler
-
-# Build and sign enclave
-
-sgx-task-enclave is the template of worker enclaves. To generate the configurations and the codes of worker enclaves on demand, we set up a worker generator. The worker generator will generate the enclave code and the enclave library.
-The enclave library will be signed by the following command:
-python worker_generator.py <model_path> <target_dir>
-<!-- (cd sgx-task-enclave && cargo build --target x86_64-fortanix-unknown-sgx ) && \
-ftxsgx-elf2sgxs $TARGET --heap-size 0x10000000 --stack-size 0x800000 --threads 8 \
-    --debug --output $TARGET_SGX && \
-#sgxs-sign --key $KEY $TARGET_SGX $TARGET_DIR/$TARGET_NAME.sig -d --xfrm 7/0 --isvprodid 0 --isvsvn 0
-sgxs-sign --key $KEY $TARGET_SGX $TARGET_SIG -d --xfrm 7/0 --isvprodid 0 --isvsvn 0 -->
-
-
-
+# Run
+./run.sh <the path of target instance dir>
 ```
 
