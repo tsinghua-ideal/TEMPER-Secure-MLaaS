@@ -67,3 +67,38 @@ python worker_generator.py <the path of generated models> <the path of target in
 ./run.sh <the path of target instance dir>
 ```
 
+## Debugging
+
+1. Encounter the warning `Blocking waiting for file lock on package cache`.
+   > Run `rm ~/.cargo/.package-cache` and re-build the project to fix it. We could also disable the rust-analyzer to avoid it.
+   >
+2. Cannot fetch crates
+   > change the crate sources.
+```
+mkdir ~/.cargo/config
+cat << EOF >> ~/.cargo/config
+[target.x86_64-fortanix-unknown-sgx]
+runner = "ftxsgx-runner-cargo"
+
+[source.crates-io]
+registry = "https://github.com/rust-lang/crates.io-index"
+
+replace-with = "tuna"
+
+[source.tuna]
+registry = "https://mirrors.tuna.tsinghua.edu.cn/git/crates.io-index.git"
+
+[source.ustc]
+registry = "git://mirrors.ustc.edu.cn/crates.io-index"
+
+[source.sjtu]
+registry = "https://mirrors.sjtug.sjtu.edu.cn/git/crates.io-index"
+
+[source.rustcc]
+registry = "https://code.aliyun.com/rustcc/crates.io-index.git"
+EOF
+```
+
+3. Feature `edition2021` is required
+> Manually add `edition = "2021"` to the `Cargo.toml` of the error packages.
+   
