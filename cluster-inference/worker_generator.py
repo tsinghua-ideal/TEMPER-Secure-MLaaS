@@ -16,6 +16,7 @@ def get_main():
     return r'''extern crate tvm_graph_rt;
 extern crate byteorder;
 
+use std::process;
 use std::net::{TcpListener, TcpStream};
 use byteorder::{NetworkEndian, WriteBytesExt};                                                                                              
 
@@ -82,6 +83,7 @@ pub fn do_tvm(){
             exec.run();
             socket.write(exec.get_output(0).unwrap().data().as_slice()).unwrap();
             println!("computing time: {:?}", SystemTime::now().duration_since(sy_time).unwrap().as_micros());
+            process::exit(0);
         }
     }
  }
@@ -220,6 +222,7 @@ def get_client_main():
 extern crate byteorder;
 extern crate rand;
 
+use std::process;
 use std::net::{TcpListener, TcpStream};
 use byteorder::{NetworkEndian, WriteBytesExt};                                                                                              
 use rand::Rng;
@@ -288,6 +291,7 @@ pub fn do_tvm(){
                 continue;
             }
             println!("total measured time: {:?}", SystemTime::now().duration_since(sy_time).unwrap().as_micros());
+            process::exit(0);
         }
     }
  }

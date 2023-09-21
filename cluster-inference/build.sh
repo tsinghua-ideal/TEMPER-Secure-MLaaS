@@ -1,4 +1,6 @@
 #!/bin/bash
+kill -9 $(ps -ef|grep 'ftxsgx' |grep -v grep|awk '{print $2}')
+
 TARGET_NAME=$1
 
 projects=$(find ${TARGET_NAME} -mindepth 1 -maxdepth 1 -type d)
@@ -12,12 +14,12 @@ for project in $projects; do
   echo "enter: $project"
   pushd "$project"
   pwd
-  cargo clean &
+  cargo build 
   sleep 5
   echo "leave: $project"
   popd
 done
 
 pushd ${TARGET_NAME}/client
-cargo clean
+cargo run 
 popd
