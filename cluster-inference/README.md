@@ -12,7 +12,7 @@ For safety concern, we have to build a reliable communication architecture to en
 
 ## Command
 Run `run.sh` to start the service, or run the following commands step by step.
-
+<!-- 
 ```
 
 # Setup environment
@@ -63,4 +63,4 @@ do
     sleep 0.5
     echo `ftxsgx-runner part0/target/x86_64-fortanix-unknown-sgx/debug/sgx-demo.sgxs` >> ${file}
 done;
-```
+``` -->

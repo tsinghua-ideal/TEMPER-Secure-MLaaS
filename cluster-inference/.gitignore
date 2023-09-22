@@ -7,3 +7,4 @@ model.o
 best-partion/
 model/
 .vscode/
+test/

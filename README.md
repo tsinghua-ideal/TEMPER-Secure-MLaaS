@@ -23,6 +23,21 @@ Note that the TVM packages should be installed by compiled packages.
 Install TVM v0.7 from https://github.com/grief8/tvm.git or https://github.com/apache/incubator-tvm.git . You can use [TVM Docs][tvm_docs] to install TVM.
 [tvm_docs]: https://tvm.apache.org/docs/install/index.html
 
+You can also refer to the following commands:
+```shell
+git clone --recursive https://github.com/grief8/tvm.git tvm
+sudo apt-get update
+sudo apt-get install -y python3 python3-dev python3-setuptools gcc libtinfo-dev zlib1g-dev build-essential cmake libedit-dev libxml2-dev
+
+mkdir build
+cp cmake/config.cmake build
+cd build
+cmake ..
+make -j4
+
+cd ../python; python setup.py install --user; cd ..
+```
+
 After the compilation, install the python packages.
 
 1. Prepare the Rust environment
@@ -61,10 +76,14 @@ cd cluster-inference
 source environment.sh
 ./clean.sh
 ./build.sh
+
 python worker_generator.py <the path of generated models> <the path of target instance dir>
 
+./run.sh <the path of target instance dir>
 
-# Build client
+```
+
+<!-- # Build client
 cd attest-client && cargo run --target x86_64-unknown-linux-gnu --features verbose --example attest_client -- -e 127.0.0.1:7710 -s 127.0.0.1:1234 -n 0
 
 # Build SP
@@ -83,8 +102,4 @@ ftxsgx-elf2sgxs $TARGET --heap-size 0x10000000 --stack-size 0x800000 --threads 8
     --debug --output $TARGET_SGX && \
 #sgxs-sign --key $KEY $TARGET_SGX $TARGET_DIR/$TARGET_NAME.sig -d --xfrm 7/0 --isvprodid 0 --isvsvn 0
 sgxs-sign --key $KEY $TARGET_SGX $TARGET_SIG -d --xfrm 7/0 --isvprodid 0 --isvsvn 0 -->
-
-
-
-```
 
