@@ -12,9 +12,9 @@ Make sure you have SGX v1 with limited EPC. See https://github.com/intel/linux-s
 
 Install the python packages according to the `requirements.txt` on Python 3.6.9.
 
-```
-pip3 install -r requirements.txt
-```
+
+Use `while read requirement; do sudo pip3 install $requirement; done < requirements.txt` or `pip3 install -r requirements.txt` .
+
 
 Note that the TVM packages should be installed by compiled packages. 
 
